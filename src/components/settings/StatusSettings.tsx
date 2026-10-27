@@ -70,29 +70,29 @@ export default function StatusSettings({ canEdit }: { canEdit: boolean }) {
         done or cancelled.
       </p>
 
-      <ul className="divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white">
+      <ul className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white">
         {statuses.map((status, index) => (
-          <li key={status.id} className="p-3">
+          <li key={status.id} className="px-4 py-3 transition-colors hover:bg-slate-50/60">
             <div className="flex flex-wrap items-center gap-3">
               <input
                 type="color"
                 value={status.color}
                 disabled={!canEdit}
                 onChange={(e) => run(() => api.updateStatus(status.id, { ...status, color: e.target.value }))}
-                className="h-8 w-8 cursor-pointer rounded border border-slate-300"
+                className="h-8 w-8 cursor-pointer rounded-lg border border-slate-200 bg-white p-0.5 disabled:cursor-default"
                 aria-label="Colour"
               />
-              <span className="font-medium text-slate-900">{status.name}</span>
-              <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{categoryLabels[status.category]}</span>
+              <span className="text-sm font-medium text-slate-900">{status.name}</span>
+              <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{categoryLabels[status.category]}</span>
               {canEdit && (
                 <div className="ml-auto flex gap-1">
-                  <Button variant="ghost" disabled={index === 0} onClick={() => move(status, -1)} aria-label="Move up">
+                  <Button variant="ghost" size="sm" className="w-8 px-0" disabled={index === 0} onClick={() => move(status, -1)} aria-label="Move up">
                     ↑
                   </Button>
-                  <Button variant="ghost" disabled={index === statuses.length - 1} onClick={() => move(status, 1)} aria-label="Move down">
+                  <Button variant="ghost" size="sm" className="w-8 px-0" disabled={index === statuses.length - 1} onClick={() => move(status, 1)} aria-label="Move down">
                     ↓
                   </Button>
-                  <Button variant="dangerGhost" disabled={statuses.length <= 1} onClick={() => startDelete(status)}>
+                  <Button variant="dangerGhost" size="sm" disabled={statuses.length <= 1} onClick={() => startDelete(status)}>
                     Delete
                   </Button>
                 </div>
@@ -100,7 +100,7 @@ export default function StatusSettings({ canEdit }: { canEdit: boolean }) {
             </div>
 
             {deletingId === status.id && (
-              <div className="mt-3 flex flex-wrap items-end gap-3 rounded-lg bg-red-50 p-3">
+              <div className="mt-3 flex flex-wrap items-end gap-3 rounded-lg bg-rose-50 p-3 ring-1 ring-inset ring-rose-100 animate-fade-in-up">
                 <div className="min-w-48 flex-1">
                   <SelectField
                     label="Move its items to"
@@ -122,14 +122,14 @@ export default function StatusSettings({ canEdit }: { canEdit: boolean }) {
       </ul>
 
       {canEdit && (
-        <form onSubmit={handleAdd} className="rounded-xl border border-slate-200 bg-white p-4">
-          <h3 className="mb-3 font-semibold text-slate-900">Add a status</h3>
+        <form onSubmit={handleAdd} className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 sm:p-5">
+          <h3 className="mb-3 text-sm font-semibold text-slate-900">Add a status</h3>
           <div className="grid gap-4 sm:grid-cols-[1fr_1fr_auto]">
             <TextField label="Name" value={name} onChange={setName} placeholder="e.g. Waiting for approval" />
             <SelectField label="Category" value={category} onChange={(v) => setCategory(v as StatusCategory)} options={categoryOptions} />
             <label className="block">
-              <span className="text-sm font-medium text-slate-700">Colour</span>
-              <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="mt-1 block h-10 w-14 rounded border border-slate-300" />
+              <span className="text-[13px] font-medium text-slate-700">Colour</span>
+              <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="mt-1.5 block h-10 w-14 cursor-pointer rounded-lg border border-slate-200 bg-white p-1" />
             </label>
           </div>
           <Button type="submit" className="mt-4">
@@ -138,7 +138,7 @@ export default function StatusSettings({ canEdit }: { canEdit: boolean }) {
         </form>
       )}
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
     </div>
   )
 }

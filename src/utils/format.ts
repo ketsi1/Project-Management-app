@@ -47,10 +47,10 @@ export const priorityLabels: Record<Priority, string> = {
 }
 
 export const priorityStyles: Record<Priority, string> = {
-  low: 'bg-slate-100 text-slate-700',
-  medium: 'bg-sky-100 text-sky-800',
-  high: 'bg-amber-100 text-amber-800',
-  urgent: 'bg-red-100 text-red-700',
+  low: 'bg-slate-100 text-slate-600 ring-1 ring-inset ring-slate-200',
+  medium: 'bg-sky-50 text-sky-700 ring-1 ring-inset ring-sky-200',
+  high: 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200',
+  urgent: 'bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-200',
 }
 
 export const categoryLabels: Record<StatusCategory, string> = {

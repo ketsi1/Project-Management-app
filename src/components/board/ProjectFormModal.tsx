@@ -48,8 +48,8 @@ export default function ProjectFormModal({ project, onClose, onSaved }: ProjectF
       <form onSubmit={handleSubmit} className="space-y-4">
         <TextField label="Name" value={name} onChange={setName} />
         <TextAreaField label="Description" value={description} onChange={setDescription} rows={3} />
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <div className="flex justify-end gap-2">
+        {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
+        <div className="grid grid-cols-2 gap-2 border-t border-slate-100 pt-4 sm:flex sm:justify-end">
           <Button type="button" variant="secondary" onClick={onClose}>
             Cancel
           </Button>

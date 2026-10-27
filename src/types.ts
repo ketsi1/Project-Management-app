@@ -10,6 +10,8 @@ export type Priority = 'low' | 'medium' | 'high' | 'urgent'
 
 export type Role = 'owner' | 'admin' | 'member'
 
+export type ViewMode = 'manager' | 'employee'
+
 export type FieldType = 'text' | 'number' | 'date' | 'select'
 
 export interface User {

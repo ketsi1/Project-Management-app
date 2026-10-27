@@ -48,20 +48,20 @@ export default function MemberSettings({ canEdit }: { canEdit: boolean }) {
 
   return (
     <div className="max-w-2xl space-y-6">
-      <ul className="divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white">
+      <ul className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white">
         {workspace.members.map((member) => (
-          <li key={member.id} className="flex items-center gap-3 p-3">
+          <li key={member.id} className="flex flex-wrap items-center gap-3 px-4 py-3 transition-colors hover:bg-slate-50/60 sm:flex-nowrap">
             <Avatar name={member.fullName} />
-            <div className="min-w-0">
-              <p className="truncate font-medium text-slate-900">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-slate-900">
                 {member.fullName}
-                {member.id === session?.user.id && <span className="ml-2 text-xs text-slate-500">(you)</span>}
+                {member.id === session?.user.id && <span className="ml-2 rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-semibold text-indigo-600">You</span>}
               </p>
               <p className="truncate text-sm text-slate-500">{member.email}</p>
             </div>
-            <span className="ml-auto rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{roleLabels[member.role]}</span>
+            <span className="ml-auto rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{roleLabels[member.role]}</span>
             {canEdit && member.role !== 'owner' && (
-              <Button variant="dangerGhost" onClick={() => handleRemove(member.id, member.fullName)}>
+              <Button variant="dangerGhost" size="sm" onClick={() => handleRemove(member.id, member.fullName)}>
                 Remove
               </Button>
             )}
@@ -70,8 +70,8 @@ export default function MemberSettings({ canEdit }: { canEdit: boolean }) {
       </ul>
 
       {canEdit && (
-        <form onSubmit={handleInvite} className="space-y-4 rounded-xl border border-slate-200 bg-white p-4">
-          <h3 className="font-semibold text-slate-900">Invite a member</h3>
+        <form onSubmit={handleInvite} className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/60 p-4 sm:p-5">
+          <h3 className="text-sm font-semibold text-slate-900">Invite a member</h3>
           <div className="grid gap-4 sm:grid-cols-3">
             <TextField label="Full name" value={fullName} onChange={setFullName} />
             <TextField label="Email" type="email" value={email} onChange={setEmail} />
@@ -90,7 +90,7 @@ export default function MemberSettings({ canEdit }: { canEdit: boolean }) {
               Demo mode: invited people appear in lists and can be assigned work, but cannot log in until the real backend sends invitation emails.
             </p>
           )}
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
           <Button type="submit">Invite</Button>
         </form>
       )}

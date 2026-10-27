@@ -41,7 +41,7 @@ export default function GeneralSettings({ canEdit }: { canEdit: boolean }) {
       <TextField label="Organization name" value={name} onChange={setName} />
 
       <div>
-        <h3 className="font-semibold text-slate-900">Terminology</h3>
+        <h3 className="text-sm font-semibold text-slate-900">Terminology</h3>
         <p className="mt-1 text-sm text-slate-600">
           Use your organization's own words. For example, a university might say "Course" and "Activity".
         </p>

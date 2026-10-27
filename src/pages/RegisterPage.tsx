@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router'
 import { errorMessage } from '../api/ApiError'
 import AuthLayout from '../components/layout/AuthLayout'
 import Button from '../components/ui/Button'
+import { Alert } from '../components/ui/Display'
 import { TextField } from '../components/ui/Fields'
 import { useAuth } from '../context/authContext'
 
@@ -47,10 +48,13 @@ export default function RegisterPage() {
       <form onSubmit={handleSubmit} className="space-y-4">
         <TextField label="Full name" value={fullName} onChange={setFullName} autoComplete="name" />
         <TextField label="Organization name" value={organizationName} onChange={setOrganizationName} autoComplete="organization" />
-        <TextField label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" />
-        <TextField label="Password" type="password" value={password} onChange={setPassword} autoComplete="new-password" />
-        <TextField label="Confirm password" type="password" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" />
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        <TextField label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" placeholder="you@company.com" />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <TextField label="Password" type="password" value={password} onChange={setPassword} autoComplete="new-password" />
+          <TextField label="Confirm password" type="password" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" />
+        </div>
+        <p className="text-xs text-slate-500">Use at least 8 characters.</p>
+        {error && <Alert>{error}</Alert>}
         <Button type="submit" loading={loading} className="w-full">
           Create account
         </Button>
@@ -58,7 +62,7 @@ export default function RegisterPage() {
 
       <p className="mt-6 text-center text-sm text-slate-600">
         Already have an account?{' '}
-        <Link to="/login" className="font-medium text-blue-600 hover:underline">
+        <Link to="/login" className="font-semibold text-indigo-600 transition-colors hover:text-indigo-700">
           Log in
         </Link>
       </p>

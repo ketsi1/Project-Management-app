@@ -25,7 +25,7 @@ export default function BoardView({ statuses, items, members, onMove, onOpen }: 
 
   return (
     <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-      <div className="flex gap-4 overflow-x-auto pb-4">
+      <div className="-mx-4 flex snap-x snap-mandatory scroll-px-4 gap-3 overflow-x-auto px-4 pb-6 sm:mx-0 sm:snap-none sm:gap-4 sm:px-0">
         {statuses.map((status) => (
           <BoardColumn
             key={status.id}
@@ -50,26 +50,43 @@ interface BoardColumnProps {
 }
 
 function BoardColumn({ status, items, statuses, members, onOpen }: BoardColumnProps) {
-  // The column's id is the status id, so a drop tells us the new status.
   const { setNodeRef, isOver } = useDroppable({ id: status.id })
 
   return (
     <section
       ref={setNodeRef}
       className={cn(
-        'flex w-72 shrink-0 flex-col rounded-xl bg-slate-100 p-3 transition-colors',
-        isOver && 'bg-blue-50 ring-2 ring-blue-300',
+        'flex w-[82vw] max-w-[19rem] shrink-0 snap-start flex-col rounded-2xl border transition-[background-color,border-color,box-shadow] duration-200 sm:w-72 sm:max-w-none',
+        isOver ? 'border-indigo-300 bg-indigo-50/70 shadow-[0_0_0_4px_rgb(99_102_241/0.12)]' : 'border-slate-200/70 bg-slate-100/60',
       )}
     >
-      <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800">
-        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: status.color }} />
-        {status.name}
-        <span className="ml-auto font-normal text-slate-500">{items.length}</span>
-      </h2>
-      <div className="flex min-h-24 flex-col gap-2">
+      {/* Column header */}
+      <div className="flex items-center gap-2 px-3.5 pt-3 pb-2.5">
+        <span
+          className="h-2 w-2 shrink-0 rounded-full"
+          style={{ backgroundColor: status.color, boxShadow: `0 0 0 3px ${status.color}26` }}
+        />
+        <h2 className="min-w-0 flex-1 truncate text-[13px] font-semibold text-slate-700">{status.name}</h2>
+        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-white px-1.5 text-[11px] font-semibold tabular-nums text-slate-500 ring-1 ring-slate-200">
+          {items.length}
+        </span>
+      </div>
+
+      {/* Cards */}
+      <div className="flex min-h-24 flex-col gap-2 px-2.5 pb-2.5">
         {items.map((item) => (
           <WorkItemCard key={item.id} item={item} statuses={statuses} members={members} onOpen={onOpen} />
         ))}
+        {items.length === 0 && (
+          <div
+            className={cn(
+              'flex h-20 items-center justify-center rounded-xl border border-dashed text-xs transition-colors',
+              isOver ? 'border-indigo-300 bg-indigo-50 text-indigo-500' : 'border-slate-300 text-slate-400',
+            )}
+          >
+            {isOver ? 'Drop here' : 'No tasks'}
+          </div>
+        )}
       </div>
     </section>
   )

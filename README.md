@@ -17,6 +17,33 @@ npm run preview  # serves that production build locally
 npm run lint     # checks the code for common mistakes
 ```
 
+## Dual Views Architecture (Boss / PM vs. Employee)
+
+The tool provides two dedicated, tailored perspectives based on role:
+
+1. **Boss / Admin / Project Manager View** (`owner` / `admin`):
+   - **Executive Command Center**: High-altitude portfolio health, velocity, and delivery tracking.
+   - **Team Capacity & Workload Matrix**: Visual workload distribution across team members (identifies overloaded employees and unassigned tasks).
+   - **Portfolio Management**: Create, edit, and delete projects, manage workflow statuses, custom fields, and organization settings.
+   - **View Mode Switcher**: Managers can toggle between **Manager View** and **Employee View** in 1 click to preview employee experience or focus on their own assigned tasks.
+
+2. **Employee / Team Member View** (`member`):
+   - **Personal Workstation**: Distraction-free personal task queue ("All", "In Progress", "To Do", "In Review", "Done").
+   - **Daily Focus Spotlight**: Highlights today's top priority task with 1-click status advancement.
+   - **1-Click Quick Progress**: Advance task statuses directly from the card without slow modals.
+   - **Safe Permissions**: Destructive actions (deleting/editing projects or altering workflows) are restricted.
+   - **Project Collaboration**: Kanban board with a 1-click "⭐ My Tasks Only" filter.
+
+### Quick Demo Accounts
+
+| Name | Role | Email | Password | Dedicated View |
+|---|---|---|---|---|
+| **Alex Morgan** | `owner` | `alex@acme.com` | `password123` | **Boss / Project Manager View** |
+| **Sarah Connor** | `member` | `sarah@acme.com` | `password123` | **Employee View** (Lead Dev) |
+| **David Kim** | `member` | `david@acme.com` | `password123` | **Employee View** (Designer) |
+
+*Use the 1-click login buttons on the login screen or the persona switcher in the bottom sidebar to test both views instantly.*
+
 ## Demo mode vs real backend
 
 With no `.env` file the app uses a built-in **demo backend** (`src/api/mockApi.ts`) that

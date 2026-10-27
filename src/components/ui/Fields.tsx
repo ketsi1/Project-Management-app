@@ -1,7 +1,9 @@
 // Labelled form inputs used by every form in the app.
 
 const inputStyles =
-  'mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200'
+  'mt-1.5 block h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-card outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-indigo-400 focus:ring-3 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500'
+
+const labelStyles = 'text-[13px] font-medium text-slate-700'
 
 interface TextFieldProps {
   label: string
@@ -15,7 +17,7 @@ interface TextFieldProps {
 export function TextField({ label, value, onChange, type = 'text', placeholder, autoComplete }: TextFieldProps) {
   return (
     <label className="block">
-      <span className="text-sm font-medium text-slate-700">{label}</span>
+      <span className={labelStyles}>{label}</span>
       <input
         type={type}
         value={value}
@@ -38,8 +40,13 @@ interface TextAreaFieldProps {
 export function TextAreaField({ label, value, onChange, rows = 4 }: TextAreaFieldProps) {
   return (
     <label className="block">
-      <span className="text-sm font-medium text-slate-700">{label}</span>
-      <textarea rows={rows} value={value} onChange={(event) => onChange(event.target.value)} className={inputStyles} />
+      <span className={labelStyles}>{label}</span>
+      <textarea
+        rows={rows}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className={`${inputStyles} h-auto resize-y py-2.5 leading-relaxed`}
+      />
     </label>
   )
 }
@@ -54,7 +61,7 @@ interface SelectFieldProps {
 export function SelectField({ label, value, onChange, options }: SelectFieldProps) {
   return (
     <label className="block">
-      <span className="text-sm font-medium text-slate-700">{label}</span>
+      <span className={labelStyles}>{label}</span>
       <select value={value} onChange={(event) => onChange(event.target.value)} className={inputStyles}>
         {options.map((option) => (
           <option key={option.value} value={option.value}>

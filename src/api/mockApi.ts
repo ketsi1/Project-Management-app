@@ -47,12 +47,236 @@ interface Database {
 
 const DB_KEY = 'pm-mock-db'
 
-// --- Small helpers ---------------------------------------------------------
+// Default password hash for 'password123' (SHA-256)
+const DEFAULT_PASSWORD_HASH = 'ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f'
+
+function getInitialDatabase(): Database {
+  const orgId = 'org-acme-default'
+  const alexId = 'user-alex-boss'
+  const sarahId = 'user-sarah-dev'
+  const davidId = 'user-david-designer'
+
+  const statuses: Status[] = [
+    { id: 'status-todo', name: 'To do', category: 'not_started', color: '#94a3b8', position: 0 },
+    { id: 'status-in-progress', name: 'In progress', category: 'active', color: '#3b82f6', position: 1 },
+    { id: 'status-in-review', name: 'In review', category: 'active', color: '#f59e0b', position: 2 },
+    { id: 'status-done', name: 'Done', category: 'done', color: '#22c55e', position: 3 },
+  ]
+
+  const project1: Project = {
+    id: 'proj-web-redesign',
+    name: 'Website Redesign & Launch',
+    description: 'Modernize marketing site, design new dashboard experience and deploy to production.',
+    createdAt: now(),
+  }
+
+  const project2: Project = {
+    id: 'proj-mobile-app',
+    name: 'Mobile App MVP',
+    description: 'Native iOS and Android client for on-the-go project tracking and real-time alerts.',
+    createdAt: now(),
+  }
+
+  const daysOffset = (d: number) => new Date(Date.now() + d * 86_400_000).toISOString().slice(0, 10)
+
+  const workItems: WorkItem[] = [
+    // Project 1 tasks
+    {
+      id: 'task-1',
+      projectId: project1.id,
+      title: 'Design responsive mockups & component tokens',
+      description: 'Create high-fidelity Figma screens for both desktop and mobile breakpoints.',
+      statusId: 'status-in-progress',
+      priority: 'high',
+      assigneeId: davidId,
+      dueDate: daysOffset(3),
+      customValues: { 'field-department': 'Design', 'field-est-hours': '16' },
+      createdAt: now(),
+      updatedAt: now(),
+    },
+    {
+      id: 'task-2',
+      projectId: project1.id,
+      title: 'Build interactive Employee Workstation view',
+      description: 'Implement personal task queue, daily focus mode, and 1-click status transitions.',
+      statusId: 'status-in-progress',
+      priority: 'urgent',
+      assigneeId: sarahId,
+      dueDate: daysOffset(2),
+      customValues: { 'field-department': 'Engineering', 'field-est-hours': '20' },
+      createdAt: now(),
+      updatedAt: now(),
+    },
+    {
+      id: 'task-3',
+      projectId: project1.id,
+      title: 'Executive Manager Command Center & Team Matrix',
+      description: 'Provide portfolio health metrics, team capacity distribution, and project controls.',
+      statusId: 'status-done',
+      priority: 'high',
+      assigneeId: sarahId,
+      dueDate: daysOffset(-1),
+      customValues: { 'field-department': 'Engineering', 'field-est-hours': '18' },
+      createdAt: now(),
+      updatedAt: now(),
+    },
+    {
+      id: 'task-4',
+      projectId: project1.id,
+      title: 'Review project milestones & budget with stakeholders',
+      description: 'Executive quarterly sync to approve budget allocation and Q4 roadmap.',
+      statusId: 'status-in-review',
+      priority: 'high',
+      assigneeId: alexId,
+      dueDate: daysOffset(5),
+      customValues: { 'field-department': 'Management', 'field-est-hours': '6' },
+      createdAt: now(),
+      updatedAt: now(),
+    },
+    {
+      id: 'task-5',
+      projectId: project1.id,
+      title: 'Set up automated CI/CD deployment pipeline',
+      description: 'Configure GitHub Actions test suite and automated staging deploy.',
+      statusId: 'status-todo',
+      priority: 'medium',
+      assigneeId: sarahId,
+      dueDate: daysOffset(7),
+      customValues: { 'field-department': 'Engineering', 'field-est-hours': '12' },
+      createdAt: now(),
+      updatedAt: now(),
+    },
+
+    // Project 2 tasks
+    {
+      id: 'task-6',
+      projectId: project2.id,
+      title: 'Mobile app user onboarding wireframes & flows',
+      description: 'Design step-by-step account activation and workspace creation flow for phone screens.',
+      statusId: 'status-done',
+      priority: 'high',
+      assigneeId: davidId,
+      dueDate: daysOffset(-2),
+      customValues: { 'field-department': 'Design', 'field-est-hours': '14' },
+      createdAt: now(),
+      updatedAt: now(),
+    },
+    {
+      id: 'task-7',
+      projectId: project2.id,
+      title: 'Implement push notification service integration',
+      description: 'Send instant notifications when task status changes or when a user is assigned work.',
+      statusId: 'status-todo',
+      priority: 'medium',
+      assigneeId: sarahId,
+      dueDate: daysOffset(4),
+      customValues: { 'field-department': 'Engineering', 'field-est-hours': '15' },
+      createdAt: now(),
+      updatedAt: now(),
+    },
+    {
+      id: 'task-8',
+      projectId: project2.id,
+      title: 'Team sprint capacity allocation & project plan',
+      description: 'Align cross-functional team bandwidth for mobile MVP release.',
+      statusId: 'status-in-progress',
+      priority: 'high',
+      assigneeId: alexId,
+      dueDate: daysOffset(1),
+      customValues: { 'field-department': 'Management', 'field-est-hours': '8' },
+      createdAt: now(),
+      updatedAt: now(),
+    },
+    {
+      id: 'task-9',
+      projectId: project2.id,
+      title: 'Design dark mode palette and icon set',
+      description: 'Ensure contrast compliance for WCAG AAA and export SVG icon assets.',
+      statusId: 'status-in-review',
+      priority: 'low',
+      assigneeId: davidId,
+      dueDate: daysOffset(6),
+      customValues: { 'field-department': 'Design', 'field-est-hours': '10' },
+      createdAt: now(),
+      updatedAt: now(),
+    },
+    {
+      id: 'task-10',
+      projectId: project2.id,
+      title: 'Conduct sprint retrospective & team feedback',
+      description: 'Collect feedback on velocity and process improvements.',
+      statusId: 'status-todo',
+      priority: 'low',
+      assigneeId: alexId,
+      dueDate: daysOffset(8),
+      customValues: { 'field-department': 'Management', 'field-est-hours': '4' },
+      createdAt: now(),
+      updatedAt: now(),
+    },
+  ]
+
+  const users: StoredUser[] = [
+    {
+      id: alexId,
+      fullName: 'Alex Morgan',
+      email: 'alex@acme.com',
+      passwordHash: DEFAULT_PASSWORD_HASH,
+      organizationId: orgId,
+      role: 'owner',
+    },
+    {
+      id: sarahId,
+      fullName: 'Sarah Connor',
+      email: 'sarah@acme.com',
+      passwordHash: DEFAULT_PASSWORD_HASH,
+      organizationId: orgId,
+      role: 'member',
+    },
+    {
+      id: davidId,
+      fullName: 'David Kim',
+      email: 'david@acme.com',
+      passwordHash: DEFAULT_PASSWORD_HASH,
+      organizationId: orgId,
+      role: 'member',
+    },
+  ]
+
+  const org: StoredOrganization = {
+    organization: { id: orgId, name: 'Acme Corp' },
+    terminology: { project: 'Project', projects: 'Projects', task: 'Task', tasks: 'Tasks' },
+    statuses,
+    fields: [
+      { id: 'field-department', label: 'Department', type: 'select', options: ['Engineering', 'Design', 'Management', 'QA'] },
+      { id: 'field-est-hours', label: 'Est. Hours', type: 'number', options: [] },
+    ],
+    projects: [project1, project2],
+    workItems,
+  }
+
+  return { users, organizations: [org] }
+}
 
 function loadDb(): Database {
   const raw = localStorage.getItem(DB_KEY)
-  if (!raw) return { users: [], organizations: [] }
-  return JSON.parse(raw) as Database
+  if (!raw) {
+    const initial = getInitialDatabase()
+    saveDb(initial)
+    return initial
+  }
+  try {
+    const parsed = JSON.parse(raw) as Database
+    if (!parsed.users || parsed.users.length === 0) {
+      const initial = getInitialDatabase()
+      saveDb(initial)
+      return initial
+    }
+    return parsed
+  } catch {
+    const initial = getInitialDatabase()
+    saveDb(initial)
+    return initial
+  }
 }
 
 function saveDb(db: Database): void {
@@ -73,7 +297,6 @@ function delay(ms = 250): Promise<void> {
 }
 
 // Hashes a password with SHA-256 so it is not stored as plain text.
-// (The real backend must use bcrypt or argon2 instead: they are slower on purpose.)
 async function hashPassword(password: string): Promise<string> {
   const bytes = new TextEncoder().encode(password)
   const digest = await crypto.subtle.digest('SHA-256', bytes)
@@ -289,13 +512,13 @@ export const mockApi: ApiClient = {
     if (db.users.some((u) => u.email === email)) {
       throw new ApiError('This email already has an account.', 409)
     }
-    // In the mock, invited members have no password and cannot log in.
+    // In the mock, invited members can log in with password123.
     // The real backend will email them a link to set their password.
     const user: StoredUser = {
       id: newId(),
       fullName: input.fullName.trim(),
       email,
-      passwordHash: '',
+      passwordHash: DEFAULT_PASSWORD_HASH,
       organizationId: org.organization.id,
       role: input.role,
     }
