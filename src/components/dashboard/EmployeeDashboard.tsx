@@ -6,7 +6,7 @@ import { useAuth } from '../../context/authContext'
 import { useWorkspace } from '../../context/workspaceContext'
 import type { Priority, WorkItem } from '../../types'
 import { pressable, scrollToSection, stopPropagation } from '../../utils/a11y'
-import { categoryOf, completion, formatDate, isOverdue, cn } from '../../utils/format'
+import { categoryOf, completion, formatDate, isOverdue, cn, priorityLabels } from '../../utils/format'
 import WorkItemModal from '../board/WorkItemModal'
 import {
   Alert,
@@ -30,12 +30,12 @@ type FilterTab = 'all' | 'in_progress' | 'to_do' | 'in_review' | 'done'
 type GroupBy = 'status' | 'project' | 'priority'
 
 export default function EmployeeDashboard({ items, onItemUpdated }: EmployeeDashboardProps) {
-  const { session, isManager, setActiveViewMode } = useAuth()
+  const { session } = useAuth()
   const { workspace, projects } = useWorkspace()
   const { statuses, terminology } = workspace
 
   const [activeTab, setActiveTab] = useState<FilterTab>('all')
-  const [groupBy, setGroupBy] = useState<GroupBy>('status')
+  const [groupBy, setGroupBy] = useState<GroupBy>('project')
   const [search, setSearch] = useState('')
   const [editingItem, setEditingItem] = useState<WorkItem | null>(null)
   const [creatingTask, setCreatingTask] = useState(false)
@@ -84,6 +84,15 @@ export default function EmployeeDashboard({ items, onItemUpdated }: EmployeeDash
     return null
   }
 
+  // Split the visible tasks into sections. By default each task is shown under its project.
+  const priorityOrder: Priority[] = ['urgent', 'high', 'medium', 'low']
+  const groups: Array<{ key: string; label: string; items: WorkItem[] }> =
+    groupBy === 'project'
+      ? projects.map((p) => ({ key: p.id, label: p.name, items: [] as WorkItem[] }))
+      : groupBy === 'status'
+        ? statuses.map((st) => ({ key: st.id, label: st.name, items: [] as WorkItem[] }))
+        : priorityOrder.map((pr) => ({ key: pr, label: priorityLabels[pr], items: [] as WorkItem[] }))
+
   // Find priority spotlight item (most urgent active or overdue task)
   const spotlightItem = [...myAllItems]
     .filter((i) => {
@@ -97,7 +106,7 @@ export default function EmployeeDashboard({ items, onItemUpdated }: EmployeeDash
       return bOver - aOver || prioRank[b.priority] - prioRank[a.priority] || (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999')
     })[0]
 
-  // Filtered list based on tabs and search
+  // Filtered list based on tabs and search (grouped further down)
   const visibleItems = myAllItems.filter((item) => {
     if (search && !item.title.toLowerCase().includes(search.toLowerCase())) return false
     const cat = categoryOf(item, statuses)
@@ -109,6 +118,12 @@ export default function EmployeeDashboard({ items, onItemUpdated }: EmployeeDash
     if (activeTab === 'done') return cat === 'done'
     return true
   })
+
+  for (const item of visibleItems) {
+    const key = groupBy === 'project' ? item.projectId : groupBy === 'status' ? item.statusId : item.priority
+    groups.find((g) => g.key === key)?.items.push(item)
+  }
+  const nonEmptyGroups = groups.filter((g) => g.items.length > 0)
 
   // Projects where employee is involved
   const myProjects = projects.filter((project) =>
@@ -150,23 +165,10 @@ export default function EmployeeDashboard({ items, onItemUpdated }: EmployeeDash
           </>
         }
         actions={
-          <>
-            <button type="button" onClick={() => setCreatingTask(true)} className={heroButton.primary}>
-              <Icon name="plus" className="h-4 w-4" />
-              New task for me
-            </button>
-            {isManager && (
-              <button
-                type="button"
-                onClick={() => setActiveViewMode('manager')}
-                className={heroButton.secondary}
-                title="Switch back to Manager Command Center"
-              >
-                <Icon name="swap" className="h-4 w-4" />
-                Manager view
-              </button>
-            )}
-          </>
+          <button type="button" onClick={() => setCreatingTask(true)} className={heroButton.primary}>
+            <Icon name="plus" className="h-4 w-4" />
+            New task for me
+          </button>
         }
       />
 
@@ -345,8 +347,16 @@ export default function EmployeeDashboard({ items, onItemUpdated }: EmployeeDash
             description="You're all caught up, or nothing matches your search."
           />
         ) : (
-          <div key={activeTab} className="stagger mt-4 space-y-2.5">
-            {visibleItems.map((item) => {
+          <div key={activeTab + groupBy} className="mt-4 space-y-6">
+            {nonEmptyGroups.map((group) => (
+              <div key={group.key}>
+                <h3 className="mb-2.5 flex items-center gap-2 text-xs font-semibold tracking-wide text-slate-500 uppercase">
+                  {groupBy === 'project' && <Icon name="folder" className="h-3.5 w-3.5" />}
+                  <span className="truncate">{group.label}</span>
+                  <span className="rounded-full bg-slate-100 px-1.5 text-[10px] leading-4 text-slate-600 tabular-nums">{group.items.length}</span>
+                </h3>
+                <div className="stagger space-y-2.5">
+            {group.items.map((item) => {
               const project = projects.find((p) => p.id === item.projectId)
               const status = statuses.find((s) => s.id === item.statusId)
               const nextStatus = getNextStatus(item)
@@ -437,6 +447,9 @@ export default function EmployeeDashboard({ items, onItemUpdated }: EmployeeDash
                 </div>
               )
             })}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </section>

@@ -7,6 +7,7 @@ import type { Role } from '../../types'
 import Avatar from '../ui/Avatar'
 import Button from '../ui/Button'
 import { SelectField, TextField } from '../ui/Fields'
+import PendingApprovals from './PendingApprovals'
 
 const roleLabels: Record<Role, string> = { owner: 'Owner', admin: 'Admin', member: 'Member' }
 
@@ -48,6 +49,8 @@ export default function MemberSettings({ canEdit }: { canEdit: boolean }) {
 
   return (
     <div className="max-w-2xl space-y-6">
+      {canEdit && <PendingApprovals />}
+
       <ul className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white">
         {workspace.members.map((member) => (
           <li key={member.id} className="flex flex-wrap items-center gap-3 px-4 py-3 transition-colors hover:bg-slate-50/60 sm:flex-nowrap">

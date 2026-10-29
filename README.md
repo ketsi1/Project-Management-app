@@ -38,11 +38,11 @@ The tool provides two dedicated, tailored perspectives based on role:
 
 | Name | Role | Email | Password | Dedicated View |
 |---|---|---|---|---|
-| **Alex Morgan** | `owner` | `alex@acme.com` | `password123` | **Boss / Project Manager View** |
-| **Sarah Connor** | `member` | `sarah@acme.com` | `password123` | **Employee View** (Lead Dev) |
-| **David Kim** | `member` | `david@acme.com` | `password123` | **Employee View** (Designer) |
+| **Alex Morgan** | `owner` | `alex@acme.com` | `87654321` | **Manager View only** |
+| **Sarah Connor** | `member` | `sarah@acme.com` | `12345678` | **Employee View only** (Developer) |
+| **David Kim** | `member` | `david@acme.com` | `21345678` | **Employee View only** (Developer) |
 
-*Use the 1-click login buttons on the login screen or the persona switcher in the bottom sidebar to test both views instantly.*
+*Log in with the email and password. The role decides the view: managers never see the employee view and employees never see the manager view (or settings). Every task belongs to a project.*
 
 ## Demo mode vs real backend
 

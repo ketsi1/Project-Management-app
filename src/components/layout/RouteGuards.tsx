@@ -14,6 +14,14 @@ export function ProtectedRoute() {
   )
 }
 
+// Manager-only pages (workspace settings). Employees are sent back to their own workstation.
+// The backend enforces the same rule, so this only stops the page from showing.
+export function ManagerOnlyRoute() {
+  const { isManager } = useAuth()
+  if (!isManager) return <Navigate to="/app" replace />
+  return <Outlet />
+}
+
 // Login and registration: only for people who are NOT logged in.
 export function PublicOnlyRoute() {
   const { session } = useAuth()

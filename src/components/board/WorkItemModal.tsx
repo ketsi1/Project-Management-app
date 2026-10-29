@@ -20,9 +20,11 @@ interface WorkItemModalProps {
 // The parent gives this component a new `key` each time it opens, so the form
 // always starts fresh with the right values.
 export default function WorkItemModal({ projectId, item, defaultStatusId, onClose, onSaved }: WorkItemModalProps) {
-  const { workspace } = useWorkspace()
+  const { workspace, projects } = useWorkspace()
   const { statuses, members, fields, terminology } = workspace
 
+  // Every task belongs to exactly one project.
+  const [selectedProjectId, setSelectedProjectId] = useState(item?.projectId ?? projectId)
   const [title, setTitle] = useState(item?.title ?? '')
   const [description, setDescription] = useState(item?.description ?? '')
   const [statusId, setStatusId] = useState(item?.statusId ?? defaultStatusId)
@@ -43,9 +45,13 @@ export default function WorkItemModal({ projectId, item, defaultStatusId, onClos
       setError('Please enter a title.')
       return
     }
+    if (!selectedProjectId) {
+      setError(`Please choose a ${terminology.project.toLowerCase()}.`)
+      return
+    }
 
     const data = {
-      projectId,
+      projectId: selectedProjectId,
       title: title.trim(),
       description,
       statusId,
@@ -85,6 +91,15 @@ export default function WorkItemModal({ projectId, item, defaultStatusId, onClos
   return (
     <Modal open title={item ? `Edit ${terminology.task.toLowerCase()}` : `New ${terminology.task.toLowerCase()}`} onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
+        <SelectField
+          label={terminology.project}
+          value={selectedProjectId}
+          onChange={setSelectedProjectId}
+          options={[
+            ...(selectedProjectId ? [] : [{ value: '', label: `Choose a ${terminology.project.toLowerCase()}…` }]),
+            ...projects.map((p) => ({ value: p.id, label: p.name })),
+          ]}
+        />
         <TextField label="Title" value={title} onChange={setTitle} />
         <TextAreaField label="Description" value={description} onChange={setDescription} rows={3} />
 

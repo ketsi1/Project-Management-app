@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
-import { usingMockApi } from '../../api'
 import { useAuth } from '../../context/authContext'
 import { useWorkspace } from '../../context/workspaceContext'
 import { cn } from '../../utils/format'
@@ -9,20 +8,13 @@ import Avatar from '../ui/Avatar'
 import BrandMark from '../ui/BrandMark'
 import Icon, { type IconName } from '../ui/Icon'
 
-const DEMO_PERSONAS: Array<{ email: string; name: string; role: string; icon: IconName }> = [
-  { email: 'alex@acme.com', name: 'Alex Morgan', role: 'Project Manager / Boss', icon: 'briefcase' },
-  { email: 'sarah@acme.com', name: 'Sarah Connor', role: 'Developer (Employee)', icon: 'code' },
-  { email: 'david@acme.com', name: 'David Kim', role: 'Designer (Employee)', icon: 'palette' },
-]
-
 export default function AppLayout() {
-  const { session, logout, isManager, activeViewMode, setActiveViewMode, switchDemoUser } = useAuth()
+  const { session, logout, isManager, activeViewMode } = useAuth()
   const { workspace, projects } = useWorkspace()
   const navigate = useNavigate()
   const location = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
   const [creatingProject, setCreatingProject] = useState(false)
-  const [demoMenuOpen, setDemoMenuOpen] = useState(false)
 
   // Mobile drawer: close with Escape and stop the page behind it from scrolling.
   useEffect(() => {
@@ -52,14 +44,24 @@ export default function AppLayout() {
     navigate('/login')
   }
 
-  async function handleSwitchPersona(email: string) {
-    if (switchDemoUser) {
-      await switchDemoUser(email)
-      setDemoMenuOpen(false)
-      setMenuOpen(false)
-      navigate('/app')
-    }
-  }
+  // Side tabs depend only on the role: managers and employees each get their own set.
+  const tasksWord = workspace.terminology.tasks
+  const pendingCount = workspace.pendingMembers?.length ?? 0
+  const navItems: Array<{ to: string; label: string; icon: IconName; badge?: number }> =
+    activeViewMode === 'manager'
+      ? [
+          { to: '/app', label: 'Executive Dashboard', icon: 'dashboard' },
+          { to: '/app/tasks', label: `All ${tasksWord}`, icon: 'list' },
+          { to: '/app/deadlines', label: 'Deadlines', icon: 'calendar' },
+          { to: '/app/team', label: 'Team', icon: 'users' },
+          { to: '/app/approvals', label: 'Approvals', icon: 'checkCircle', badge: pendingCount },
+          { to: '/app/settings', label: 'Workspace Settings', icon: 'settings' },
+        ]
+      : [
+          { to: '/app', label: 'My Workstation', icon: 'target' },
+          { to: '/app/tasks', label: `My ${tasksWord}`, icon: 'list' },
+          { to: '/app/deadlines', label: 'Deadlines', icon: 'calendar' },
+        ]
 
   const roleLabel =
     session?.role === 'owner'
@@ -89,61 +91,19 @@ export default function AppLayout() {
       </div>
 
       <div className="flex-1 space-y-6 overflow-y-auto px-3 py-5">
-        {/* View mode switcher (managers) */}
-        {isManager && (
-          <div>
-            <p className="eyebrow mb-2 px-3">View mode</p>
-            <div className="relative grid grid-cols-2 rounded-lg bg-slate-100 p-1" role="tablist" aria-label="View mode">
-              <span
-                aria-hidden="true"
-                className={cn(
-                  'absolute inset-y-1 left-1 w-[calc(50%-4px)] rounded-md bg-white shadow-sm ring-1 ring-slate-900/5 transition-transform duration-300 ease-out-expo',
-                  activeViewMode === 'employee' && 'translate-x-full',
-                )}
-              />
-              {(
-                [
-                  { mode: 'manager', label: 'Manager', icon: 'briefcase' },
-                  { mode: 'employee', label: 'Employee', icon: 'user' },
-                ] as const
-              ).map(({ mode, label, icon }) => (
-                <button
-                  key={mode}
-                  type="button"
-                  role="tab"
-                  aria-selected={activeViewMode === mode}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setActiveViewMode(mode)
-                  }}
-                  className={cn(
-                    'relative z-10 flex items-center justify-center gap-1.5 rounded-md py-1.5 text-xs font-semibold transition-colors',
-                    activeViewMode === mode ? 'text-indigo-700' : 'text-slate-500 hover:text-slate-800',
-                  )}
-                >
-                  <Icon name={icon} className="h-3.5 w-3.5" />
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* Navigation */}
         <div>
           <p className="eyebrow mb-2 px-3">Navigation</p>
           <div className="space-y-0.5">
-            <NavLink to="/app" end className={linkClass}>
-              <Icon name={activeViewMode === 'manager' ? 'dashboard' : 'target'} className="h-[18px] w-[18px] shrink-0" />
-              <span className="truncate">{activeViewMode === 'manager' ? 'Executive Dashboard' : 'My Workstation'}</span>
-            </NavLink>
-
-            {isManager && (
-              <NavLink to="/app/settings" className={linkClass}>
-                <Icon name="settings" className="h-[18px] w-[18px] shrink-0" />
-                <span className="truncate">Workspace Settings</span>
+            {navItems.map((nav) => (
+              <NavLink key={nav.to} to={nav.to} end={nav.to === '/app'} className={linkClass}>
+                <Icon name={nav.icon} className="h-[18px] w-[18px] shrink-0" />
+                <span className="flex-1 truncate">{nav.label}</span>
+                {nav.badge ? (
+                  <span className="rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-800 tabular-nums">{nav.badge}</span>
+                ) : null}
               </NavLink>
-            )}
+            ))}
           </div>
         </div>
 
@@ -190,68 +150,8 @@ export default function AppLayout() {
         </div>
       </div>
 
-      {/* Footer: demo switcher + user */}
+      {/* Footer: user */}
       <div className="shrink-0 space-y-2 border-t border-slate-100 p-3">
-        {usingMockApi && (
-          <div className="relative">
-            <button
-              type="button"
-              aria-expanded={demoMenuOpen}
-              onClick={(e) => {
-                e.stopPropagation()
-                setDemoMenuOpen(!demoMenuOpen)
-              }}
-              className="flex w-full items-center justify-between gap-2 rounded-lg border border-dashed border-indigo-200 bg-indigo-50/50 px-3 py-2 text-left text-xs font-semibold text-indigo-700 transition-colors hover:border-indigo-300 hover:bg-indigo-50"
-            >
-              <span className="flex items-center gap-2">
-                <Icon name="swap" className="h-3.5 w-3.5" />
-                Switch demo persona
-              </span>
-              <Icon
-                name="chevronDown"
-                className={cn('h-3.5 w-3.5 transition-transform duration-200', demoMenuOpen && 'rotate-180')}
-              />
-            </button>
-
-            {demoMenuOpen && (
-              <div
-                className="absolute bottom-full left-0 z-50 mb-2 w-full space-y-0.5 rounded-xl border border-slate-200 bg-white p-1.5 shadow-pop animate-scale-in"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <p className="eyebrow px-2 py-1.5">Demo personas</p>
-                {DEMO_PERSONAS.map((persona) => {
-                  const current = session?.user.email === persona.email
-                  return (
-                    <button
-                      key={persona.email}
-                      type="button"
-                      onClick={() => handleSwitchPersona(persona.email)}
-                      className={cn(
-                        'flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-xs transition-colors',
-                        current ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-50',
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          'flex h-7 w-7 shrink-0 items-center justify-center rounded-md',
-                          current ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-500',
-                        )}
-                      >
-                        <Icon name={persona.icon} className="h-3.5 w-3.5" />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate font-semibold">{persona.name}</span>
-                        <span className="block truncate text-[11px] text-slate-400">{persona.role}</span>
-                      </span>
-                      {current && <Icon name="check" className="h-3.5 w-3.5 shrink-0 text-indigo-600" />}
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
         <div className="flex items-center gap-3 rounded-lg px-2 py-1.5">
           <Avatar name={session?.user.fullName ?? '?'} size="md" />
           <div className="min-w-0 flex-1">

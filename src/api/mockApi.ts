@@ -29,7 +29,11 @@ interface StoredUser {
   passwordHash: string
   organizationId: string
   role: Role
+  // 'pending' = signed up, waiting for a manager. Missing means active.
+  status?: 'pending' | 'active'
 }
+
+const PENDING_MESSAGE = 'Your account is waiting for a manager to approve it. You can log in once it is approved.'
 
 interface StoredOrganization {
   organization: Organization
@@ -45,16 +49,18 @@ interface Database {
   organizations: StoredOrganization[]
 }
 
-const DB_KEY = 'pm-mock-db'
+// v3: one manager + two developers with their own passwords, and sign-ups that wait for approval.
+// The new key makes browsers that saved the old demo data load the new users.
+const DB_KEY = 'pm-mock-db-v3'
 
-// Default password hash for 'password123' (SHA-256)
+// Password hash for 'password123' (SHA-256), used by members invited in the mock.
 const DEFAULT_PASSWORD_HASH = 'ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f'
 
 function getInitialDatabase(): Database {
   const orgId = 'org-acme-default'
   const alexId = 'user-alex-boss'
   const sarahId = 'user-sarah-dev'
-  const davidId = 'user-david-designer'
+  const davidId = 'user-david-dev'
 
   const statuses: Status[] = [
     { id: 'status-todo', name: 'To do', category: 'not_started', color: '#94a3b8', position: 0 },
@@ -220,7 +226,7 @@ function getInitialDatabase(): Database {
       id: alexId,
       fullName: 'Alex Morgan',
       email: 'alex@acme.com',
-      passwordHash: DEFAULT_PASSWORD_HASH,
+      passwordHash: 'e24df920078c3dd4e7e8d2442f00e5c9ab2a231bb3918d65cc50906e49ecaef4', // 87654321
       organizationId: orgId,
       role: 'owner',
     },
@@ -228,7 +234,7 @@ function getInitialDatabase(): Database {
       id: sarahId,
       fullName: 'Sarah Connor',
       email: 'sarah@acme.com',
-      passwordHash: DEFAULT_PASSWORD_HASH,
+      passwordHash: 'ef797c8118f02dfb649607dd5d3f8c7623048c9c063d532cc95c5ed7a898a64f', // 12345678
       organizationId: orgId,
       role: 'member',
     },
@@ -236,7 +242,7 @@ function getInitialDatabase(): Database {
       id: davidId,
       fullName: 'David Kim',
       email: 'david@acme.com',
-      passwordHash: DEFAULT_PASSWORD_HASH,
+      passwordHash: 'c7be1876fbf200269cbac72494aa5e8e3827814a3c9759221e65eb22974d22de', // 21345678
       organizationId: orgId,
       role: 'member',
     },
@@ -330,52 +336,10 @@ function toSession(user: StoredUser, organization: Organization): Session {
   }
 }
 
-// --- The starting setup every new organization receives -------------------
-
-function seedOrganization(name: string, ownerId: string): StoredOrganization {
-  const statuses: Status[] = [
-    { id: newId(), name: 'To do', category: 'not_started', color: '#94a3b8', position: 0 },
-    { id: newId(), name: 'In progress', category: 'active', color: '#3b82f6', position: 1 },
-    { id: newId(), name: 'In review', category: 'active', color: '#f59e0b', position: 2 },
-    { id: newId(), name: 'Done', category: 'done', color: '#22c55e', position: 3 },
-  ]
-  const project: Project = {
-    id: newId(),
-    name: 'Getting started',
-    description: 'A sample project to explore the board.',
-    createdAt: now(),
-  }
-  const sample = (title: string, statusIndex: number, priority: WorkItem['priority'], days: number): WorkItem => ({
-    id: newId(),
-    projectId: project.id,
-    title,
-    description: '',
-    statusId: statuses[statusIndex].id,
-    priority,
-    assigneeId: ownerId,
-    dueDate: new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10),
-    customValues: {},
-    createdAt: now(),
-    updatedAt: now(),
-  })
-  return {
-    organization: { id: newId(), name },
-    terminology: { project: 'Project', projects: 'Projects', task: 'Task', tasks: 'Tasks' },
-    statuses,
-    fields: [],
-    projects: [project],
-    workItems: [
-      sample('Invite your team members', 0, 'high', 2),
-      sample('Rename statuses to match your process', 1, 'medium', 4),
-      sample('Add a custom field in Settings', 2, 'low', 7),
-      sample('Create your account', 3, 'low', -1),
-    ],
-  }
-}
-
 // --- The mock API itself ---------------------------------------------------
 
 export const mockApi: ApiClient = {
+  // Sign-up joins an existing organization as a pending employee and does NOT log in.
   async register(input) {
     await delay()
     const db = loadDb()
@@ -383,20 +347,22 @@ export const mockApi: ApiClient = {
     if (db.users.some((u) => u.email === email)) {
       throw new ApiError('An account with this email already exists.', 409)
     }
-    const userId = newId()
-    const org = seedOrganization(input.organizationName.trim(), userId)
-    const user: StoredUser = {
-      id: userId,
+    const wanted = input.organizationName.trim().toLowerCase()
+    const org = db.organizations.find((o) => o.organization.name.toLowerCase() === wanted)
+    if (!org) {
+      throw new ApiError('No organization with that name. Ask your manager for the exact organization name.', 404)
+    }
+    db.users.push({
+      id: newId(),
       fullName: input.fullName.trim(),
       email,
       passwordHash: await hashPassword(input.password),
       organizationId: org.organization.id,
-      role: 'owner',
-    }
-    db.users.push(user)
-    db.organizations.push(org)
+      role: 'member',
+      status: 'pending',
+    })
     saveDb(db)
-    return toSession(user, org.organization)
+    return { pending: true, message: PENDING_MESSAGE }
   },
 
   async login(input) {
@@ -409,6 +375,8 @@ export const mockApi: ApiClient = {
     if (!user || !user.passwordHash || user.passwordHash !== hash) {
       throw new ApiError('Email or password is incorrect.', 401)
     }
+    // Checked after the password, so strangers cannot probe which emails are pending.
+    if (user.status === 'pending') throw new ApiError(PENDING_MESSAGE, 403)
     const org = db.organizations.find((o) => o.organization.id === user.organizationId)
     if (!org) throw new ApiError('Organization not found.', 404)
     return toSession(user, org.organization)
@@ -422,15 +390,17 @@ export const mockApi: ApiClient = {
     await delay()
     const db = loadDb()
     const org = currentOrg(db)
-    const members: Member[] = db.users
-      .filter((u) => u.organizationId === org.organization.id)
-      .map((u) => ({ id: u.id, fullName: u.fullName, email: u.email, role: u.role }))
+    const inOrg = db.users.filter((u) => u.organizationId === org.organization.id)
+    const toMember = (u: StoredUser): Member => ({ id: u.id, fullName: u.fullName, email: u.email, role: u.role })
+    const session = getStoredSession()
+    const isManager = session?.role === 'owner' || session?.role === 'admin'
     return {
       organization: org.organization,
       terminology: org.terminology,
       statuses: [...org.statuses].sort((a, b) => a.position - b.position),
       fields: org.fields,
-      members,
+      members: inOrg.filter((u) => u.status !== 'pending').map(toMember),
+      pendingMembers: isManager ? inOrg.filter((u) => u.status === 'pending').map(toMember) : [],
     }
   },
 
@@ -525,6 +495,17 @@ export const mockApi: ApiClient = {
     db.users.push(user)
     saveDb(db)
     return { id: user.id, fullName: user.fullName, email: user.email, role: user.role }
+  },
+
+  async approveMember(id) {
+    await delay()
+    requireAdmin()
+    const db = loadDb()
+    const org = currentOrg(db)
+    const user = db.users.find((u) => u.id === id && u.organizationId === org.organization.id && u.status === 'pending')
+    if (!user) throw new ApiError('No pending sign-up found for this person.', 404)
+    user.status = 'active'
+    saveDb(db)
   },
 
   async removeMember(id) {

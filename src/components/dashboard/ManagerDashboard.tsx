@@ -29,7 +29,7 @@ interface ManagerDashboardProps {
 }
 
 export default function ManagerDashboard({ items, onItemUpdated }: ManagerDashboardProps) {
-  const { session, setActiveViewMode } = useAuth()
+  const { session } = useAuth()
   const { workspace, projects, reloadProjects } = useWorkspace()
   const { statuses, members, terminology } = workspace
   const navigate = useNavigate()
@@ -139,16 +139,6 @@ export default function ManagerDashboard({ items, onItemUpdated }: ManagerDashbo
             <button type="button" onClick={() => setCreatingProject(true)} className={heroButton.secondary}>
               <Icon name="folder" className="h-4 w-4" />
               New {terminology.project}
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveViewMode('employee')}
-              className={heroButton.secondary}
-              title="Switch to personal Employee Workstation"
-            >
-              <Icon name="swap" className="h-4 w-4" />
-              <span className="hidden sm:inline">Employee view</span>
-              <span className="sm:hidden">Switch</span>
             </button>
           </>
         }

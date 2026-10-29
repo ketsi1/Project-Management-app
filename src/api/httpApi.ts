@@ -33,7 +33,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const httpApi: ApiClient = {
-  register: (input) => request('POST', '/auth/register', input), // → Session
+  register: (input) => request('POST', '/auth/register', input), // → { pending, message } (no login)
   login: (input) => request('POST', '/auth/login', input), // → Session
   logout: () => request('POST', '/auth/logout'), // → 204
 
@@ -50,7 +50,8 @@ export const httpApi: ApiClient = {
   deleteField: (id) => request('DELETE', `/fields/${id}`), // → 204
 
   inviteMember: (input) => request('POST', '/members', input), // → Member
-  removeMember: (id) => request('DELETE', `/members/${id}`), // → 204
+  approveMember: (id) => request('POST', `/members/${id}/approve`), // → 204
+  removeMember: (id) => request('DELETE', `/members/${id}`), // → 204 (also rejects a pending sign-up)
 
   listProjects: () => request('GET', '/projects'), // → Project[]
   createProject: (input) => request('POST', '/projects', input), // → Project

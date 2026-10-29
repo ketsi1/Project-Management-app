@@ -91,6 +91,8 @@ export interface Workspace {
   statuses: Status[]
   fields: CustomField[]
   members: Member[]
+  // Sign-ups waiting for a manager to approve them. Always empty for employees.
+  pendingMembers: Member[]
 }
 
 // Input shapes for create and update requests.
@@ -98,6 +100,12 @@ export type WorkItemInput = Omit<WorkItem, 'id' | 'createdAt' | 'updatedAt'>
 export type ProjectInput = Pick<Project, 'name' | 'description'>
 export type StatusInput = Omit<Status, 'id'>
 export type FieldInput = Omit<CustomField, 'id'>
+
+// What sign-up returns: the account exists but cannot log in until a manager approves it.
+export interface RegisterResult {
+  pending: true
+  message: string
+}
 
 export interface RegisterInput {
   fullName: string

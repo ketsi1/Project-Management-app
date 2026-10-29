@@ -7,6 +7,7 @@ import type {
   Project,
   ProjectInput,
   RegisterInput,
+  RegisterResult,
   Session,
   Status,
   StatusInput,
@@ -20,7 +21,7 @@ import type {
 // Both the mock backend and the real HTTP client follow this contract,
 // so the rest of the app never needs to know which one it is using.
 export interface ApiClient {
-  register(input: RegisterInput): Promise<Session>
+  register(input: RegisterInput): Promise<RegisterResult>
   login(input: LoginInput): Promise<Session>
   logout(): Promise<void>
 
@@ -35,6 +36,7 @@ export interface ApiClient {
   deleteField(id: string): Promise<void>
 
   inviteMember(input: InviteInput): Promise<Member>
+  approveMember(id: string): Promise<void>
   removeMember(id: string): Promise<void>
 
   listProjects(): Promise<Project[]>
