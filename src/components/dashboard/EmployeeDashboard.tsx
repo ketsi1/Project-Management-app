@@ -19,7 +19,6 @@ import {
   StatCard,
 } from '../ui/Display'
 import Icon from '../ui/Icon'
-import { heroButton } from '../ui/styles'
 
 interface EmployeeDashboardProps {
   items: WorkItem[]
@@ -38,7 +37,6 @@ export default function EmployeeDashboard({ items, onItemUpdated }: EmployeeDash
   const [groupBy, setGroupBy] = useState<GroupBy>('project')
   const [search, setSearch] = useState('')
   const [editingItem, setEditingItem] = useState<WorkItem | null>(null)
-  const [creatingTask, setCreatingTask] = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [feedbackMessage, setFeedbackMessage] = useState('')
 
@@ -153,7 +151,7 @@ export default function EmployeeDashboard({ items, onItemUpdated }: EmployeeDash
       {/* Welcome banner */}
       <PageHero
         accent="sky"
-        eyebrow="My workstation · Individual focus"
+        eyebrow="My workstation"
         title={`Good day, ${employeeFirstName}`}
         description={
           <>
@@ -163,12 +161,6 @@ export default function EmployeeDashboard({ items, onItemUpdated }: EmployeeDash
               <span className="ml-1 font-semibold text-rose-300">{myOverdueItems.length} need immediate attention.</span>
             )}
           </>
-        }
-        actions={
-          <button type="button" onClick={() => setCreatingTask(true)} className={heroButton.primary}>
-            <Icon name="plus" className="h-4 w-4" />
-            New task for me
-          </button>
         }
       />
 
@@ -531,20 +523,6 @@ export default function EmployeeDashboard({ items, onItemUpdated }: EmployeeDash
           onClose={() => setEditingItem(null)}
           onSaved={() => {
             setEditingItem(null)
-            onItemUpdated()
-          }}
-        />
-      )}
-
-      {creatingTask && (
-        <WorkItemModal
-          key="new-task"
-          projectId={projects[0]?.id ?? ''}
-          item={null}
-          defaultStatusId={statuses[0]?.id ?? ''}
-          onClose={() => setCreatingTask(false)}
-          onSaved={() => {
-            setCreatingTask(false)
             onItemUpdated()
           }}
         />

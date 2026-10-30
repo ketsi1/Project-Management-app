@@ -9,10 +9,12 @@ interface BoardViewProps {
   members: Member[]
   onMove: (itemId: string, statusId: string) => void
   onOpen: (item: WorkItem) => void
+  // Cards that return false cannot be dragged (an employee looking at a teammate's task).
+  canMove?: (item: WorkItem) => boolean
 }
 
 // The Kanban board: one column per status, cards can be dragged between columns.
-export default function BoardView({ statuses, items, members, onMove, onOpen }: BoardViewProps) {
+export default function BoardView({ statuses, items, members, onMove, onOpen, canMove }: BoardViewProps) {
   // Start a drag only after the pointer moves 5px, so a simple click still opens the card.
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
@@ -20,7 +22,7 @@ export default function BoardView({ statuses, items, members, onMove, onOpen }: 
     const itemId = String(event.active.id)
     const statusId = event.over ? String(event.over.id) : null
     const item = items.find((i) => i.id === itemId)
-    if (item && statusId && item.statusId !== statusId) onMove(itemId, statusId)
+    if (item && statusId && item.statusId !== statusId && (canMove?.(item) ?? true)) onMove(itemId, statusId)
   }
 
   return (
@@ -34,6 +36,7 @@ export default function BoardView({ statuses, items, members, onMove, onOpen }: 
             statuses={statuses}
             members={members}
             onOpen={onOpen}
+            canMove={canMove}
           />
         ))}
       </div>
@@ -47,9 +50,10 @@ interface BoardColumnProps {
   statuses: Status[]
   members: Member[]
   onOpen: (item: WorkItem) => void
+  canMove?: (item: WorkItem) => boolean
 }
 
-function BoardColumn({ status, items, statuses, members, onOpen }: BoardColumnProps) {
+function BoardColumn({ status, items, statuses, members, onOpen, canMove }: BoardColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: status.id })
 
   return (
@@ -75,7 +79,14 @@ function BoardColumn({ status, items, statuses, members, onOpen }: BoardColumnPr
       {/* Cards */}
       <div className="flex min-h-24 flex-col gap-2 px-2.5 pb-2.5">
         {items.map((item) => (
-          <WorkItemCard key={item.id} item={item} statuses={statuses} members={members} onOpen={onOpen} />
+          <WorkItemCard
+            key={item.id}
+            item={item}
+            statuses={statuses}
+            members={members}
+            onOpen={onOpen}
+            draggable={canMove?.(item) ?? true}
+          />
         ))}
         {items.length === 0 && (
           <div

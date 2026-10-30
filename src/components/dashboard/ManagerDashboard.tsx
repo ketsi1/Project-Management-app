@@ -36,7 +36,14 @@ export default function ManagerDashboard({ items, onItemUpdated }: ManagerDashbo
 
   const [creatingProject, setCreatingProject] = useState(false)
   const [editingItem, setEditingItem] = useState<WorkItem | null>(null)
-  const [creatingItem, setCreatingItem] = useState(false)
+  // Project the new task goes into: null = form closed, '' = the manager must choose one.
+  const [creatingItemFor, setCreatingItemFor] = useState<string | null>(null)
+
+  // Every task belongs to a project, so with no projects yet we start by creating one.
+  function startNewTask(projectId = '') {
+    if (projects.length === 0) setCreatingProject(true)
+    else setCreatingItemFor(projectId)
+  }
   const [selectedMemberFilter, setSelectedMemberFilter] = useState<string | null>(null)
   const [quickError, setQuickError] = useState('')
 
@@ -122,17 +129,12 @@ export default function ManagerDashboard({ items, onItemUpdated }: ManagerDashbo
     <div className="space-y-6 pb-12 sm:space-y-8">
       {/* Welcome banner */}
       <PageHero
-        eyebrow="Executive hub · Manager view"
-        title="Portfolio & Operations"
-        description={
-          <>
-            Welcome back, {session?.user.fullName}. Oversight of {workspace.organization.name}’s projects, team capacity
-            and critical delivery milestones.
-          </>
-        }
+        eyebrow="Manager view"
+        title={`Good day, ${session?.user.fullName.split(' ')[0] ?? 'there'}`}
+        description={`${workspace.organization.name} · projects, team capacity and deadlines at a glance.`}
         actions={
           <>
-            <button type="button" onClick={() => setCreatingItem(true)} className={heroButton.primary}>
+            <button type="button" onClick={() => startNewTask()} className={heroButton.primary}>
               <Icon name="plus" className="h-4 w-4" />
               New {terminology.task}
             </button>
@@ -351,18 +353,21 @@ export default function ManagerDashboard({ items, onItemUpdated }: ManagerDashbo
                 const overdueCount = projectItems.filter((i) => isOverdue(i, statuses)).length
 
                 return (
-                  <Link
-                    key={project.id}
-                    to={`/app/projects/${project.id}`}
-                    className="surface interactive-card group flex flex-col p-5"
-                  >
+                  // The title link stretches over the whole card, so the card stays clickable
+                  // while the "Add task" button inside it remains a separate control.
+                  <div key={project.id} className="surface interactive-card group relative flex flex-col p-5">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex min-w-0 items-center gap-3">
                         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-sm font-bold uppercase text-indigo-600 ring-1 ring-inset ring-indigo-100">
                           {project.name.charAt(0)}
                         </span>
                         <h3 className="truncate font-semibold text-slate-900 transition-colors group-hover:text-indigo-700">
-                          {project.name}
+                          <Link
+                            to={`/app/projects/${project.id}`}
+                            className="rounded-sm after:absolute after:inset-0 after:rounded-[inherit] focus-visible:outline-none"
+                          >
+                            {project.name}
+                          </Link>
                         </h3>
                       </div>
                       {overdueCount > 0 && <OverdueBadge label={`${overdueCount} overdue`} />}
@@ -404,12 +409,23 @@ export default function ManagerDashboard({ items, onItemUpdated }: ManagerDashbo
                       <span className="text-xs text-slate-400">
                         {projectItems.length} {terminology.tasks.toLowerCase()}
                       </span>
-                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-400 transition-colors group-hover:text-indigo-600">
-                        Open board
-                        <Icon name="arrowRight" className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
-                      </span>
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => startNewTask(project.id)}
+                          className="relative z-10 inline-flex h-7 items-center gap-1 rounded-md bg-indigo-50 px-2 text-xs font-semibold text-indigo-700 transition-[background-color,scale] hover:bg-indigo-100 active:scale-95"
+                          aria-label={`Add ${terminology.task.toLowerCase()} to ${project.name}`}
+                        >
+                          <Icon name="plus" className="h-3.5 w-3.5" />
+                          Add {terminology.task.toLowerCase()}
+                        </button>
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-400 transition-colors group-hover:text-indigo-600">
+                          Open board
+                          <Icon name="arrowRight" className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+                        </span>
+                      </div>
                     </div>
-                  </Link>
+                  </div>
                 )
               })}
             </div>
@@ -512,15 +528,15 @@ export default function ManagerDashboard({ items, onItemUpdated }: ManagerDashbo
         />
       )}
 
-      {creatingItem && (
+      {creatingItemFor !== null && (
         <WorkItemModal
-          key="manager-create-task"
-          projectId={projects[0]?.id ?? ''}
+          key={`manager-create-task-${creatingItemFor}`}
+          projectId={creatingItemFor}
           item={null}
           defaultStatusId={statuses[0]?.id ?? ''}
-          onClose={() => setCreatingItem(false)}
+          onClose={() => setCreatingItemFor(null)}
           onSaved={() => {
-            setCreatingItem(false)
+            setCreatingItemFor(null)
             onItemUpdated()
           }}
         />

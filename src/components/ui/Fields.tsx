@@ -12,9 +12,10 @@ interface TextFieldProps {
   type?: string
   placeholder?: string
   autoComplete?: string
+  disabled?: boolean
 }
 
-export function TextField({ label, value, onChange, type = 'text', placeholder, autoComplete }: TextFieldProps) {
+export function TextField({ label, value, onChange, type = 'text', placeholder, autoComplete, disabled }: TextFieldProps) {
   return (
     <label className="block">
       <span className={labelStyles}>{label}</span>
@@ -23,6 +24,7 @@ export function TextField({ label, value, onChange, type = 'text', placeholder, 
         value={value}
         placeholder={placeholder}
         autoComplete={autoComplete}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
         className={inputStyles}
       />
@@ -35,14 +37,16 @@ interface TextAreaFieldProps {
   value: string
   onChange: (value: string) => void
   rows?: number
+  disabled?: boolean
 }
 
-export function TextAreaField({ label, value, onChange, rows = 4 }: TextAreaFieldProps) {
+export function TextAreaField({ label, value, onChange, rows = 4, disabled }: TextAreaFieldProps) {
   return (
     <label className="block">
       <span className={labelStyles}>{label}</span>
       <textarea
         rows={rows}
+        disabled={disabled}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className={`${inputStyles} h-auto resize-y py-2.5 leading-relaxed`}
@@ -56,13 +60,14 @@ interface SelectFieldProps {
   value: string
   onChange: (value: string) => void
   options: Array<{ value: string; label: string }>
+  disabled?: boolean
 }
 
-export function SelectField({ label, value, onChange, options }: SelectFieldProps) {
+export function SelectField({ label, value, onChange, options, disabled }: SelectFieldProps) {
   return (
     <label className="block">
       <span className={labelStyles}>{label}</span>
-      <select value={value} onChange={(event) => onChange(event.target.value)} className={inputStyles}>
+      <select value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} className={inputStyles}>
         {options.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}

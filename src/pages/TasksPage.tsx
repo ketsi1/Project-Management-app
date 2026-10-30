@@ -67,10 +67,13 @@ export default function TasksPage() {
               : `Everything assigned to you, grouped by ${terminology.project.toLowerCase()}.`}
           </p>
         </div>
-        <Button onClick={() => setCreating(true)}>
-          <Icon name="plus" className="h-4 w-4" />
-          New {terminology.task.toLowerCase()}
-        </Button>
+        {/* Only managers create tasks. */}
+        {isManager && (
+          <Button onClick={() => setCreating(true)}>
+            <Icon name="plus" className="h-4 w-4" />
+            New {terminology.task.toLowerCase()}
+          </Button>
+        )}
       </div>
 
       {error && <Alert>{error}</Alert>}

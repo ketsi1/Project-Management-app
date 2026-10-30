@@ -49,9 +49,9 @@ interface Database {
   organizations: StoredOrganization[]
 }
 
-// v3: one manager + two developers with their own passwords, and sign-ups that wait for approval.
-// The new key makes browsers that saved the old demo data load the new users.
-const DB_KEY = 'pm-mock-db-v3'
+// v4: tasks remember who created them (employees may only edit/delete their own).
+// The new key makes browsers that saved the old demo data load the new data.
+const DB_KEY = 'pm-mock-db-v4'
 
 // Password hash for 'password123' (SHA-256), used by members invited in the mock.
 const DEFAULT_PASSWORD_HASH = 'ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f'
@@ -97,6 +97,7 @@ function getInitialDatabase(): Database {
       assigneeId: davidId,
       dueDate: daysOffset(3),
       customValues: { 'field-department': 'Design', 'field-est-hours': '16' },
+      createdById: alexId,
       createdAt: now(),
       updatedAt: now(),
     },
@@ -110,6 +111,7 @@ function getInitialDatabase(): Database {
       assigneeId: sarahId,
       dueDate: daysOffset(2),
       customValues: { 'field-department': 'Engineering', 'field-est-hours': '20' },
+      createdById: alexId,
       createdAt: now(),
       updatedAt: now(),
     },
@@ -123,6 +125,7 @@ function getInitialDatabase(): Database {
       assigneeId: sarahId,
       dueDate: daysOffset(-1),
       customValues: { 'field-department': 'Engineering', 'field-est-hours': '18' },
+      createdById: alexId,
       createdAt: now(),
       updatedAt: now(),
     },
@@ -136,6 +139,7 @@ function getInitialDatabase(): Database {
       assigneeId: alexId,
       dueDate: daysOffset(5),
       customValues: { 'field-department': 'Management', 'field-est-hours': '6' },
+      createdById: alexId,
       createdAt: now(),
       updatedAt: now(),
     },
@@ -149,6 +153,7 @@ function getInitialDatabase(): Database {
       assigneeId: sarahId,
       dueDate: daysOffset(7),
       customValues: { 'field-department': 'Engineering', 'field-est-hours': '12' },
+      createdById: alexId,
       createdAt: now(),
       updatedAt: now(),
     },
@@ -164,6 +169,7 @@ function getInitialDatabase(): Database {
       assigneeId: davidId,
       dueDate: daysOffset(-2),
       customValues: { 'field-department': 'Design', 'field-est-hours': '14' },
+      createdById: alexId,
       createdAt: now(),
       updatedAt: now(),
     },
@@ -177,6 +183,7 @@ function getInitialDatabase(): Database {
       assigneeId: sarahId,
       dueDate: daysOffset(4),
       customValues: { 'field-department': 'Engineering', 'field-est-hours': '15' },
+      createdById: alexId,
       createdAt: now(),
       updatedAt: now(),
     },
@@ -190,6 +197,7 @@ function getInitialDatabase(): Database {
       assigneeId: alexId,
       dueDate: daysOffset(1),
       customValues: { 'field-department': 'Management', 'field-est-hours': '8' },
+      createdById: alexId,
       createdAt: now(),
       updatedAt: now(),
     },
@@ -203,6 +211,7 @@ function getInitialDatabase(): Database {
       assigneeId: davidId,
       dueDate: daysOffset(6),
       customValues: { 'field-department': 'Design', 'field-est-hours': '10' },
+      createdById: alexId,
       createdAt: now(),
       updatedAt: now(),
     },
@@ -216,6 +225,7 @@ function getInitialDatabase(): Database {
       assigneeId: alexId,
       dueDate: daysOffset(8),
       customValues: { 'field-department': 'Management', 'field-est-hours': '4' },
+      createdById: alexId,
       createdAt: now(),
       updatedAt: now(),
     },
@@ -325,6 +335,19 @@ function requireAdmin(): void {
   if (!session || session.role === 'member') {
     throw new ApiError('Only owners and admins can change settings.', 403)
   }
+}
+
+function isManagerSession(): boolean {
+  const role = getStoredSession()?.role
+  return role === 'owner' || role === 'admin'
+}
+
+// Same rule as the real backend: managers see every project, employees only projects
+// where at least one task is assigned to them.
+function visibleProjectIds(org: StoredOrganization): Set<string> | null {
+  if (isManagerSession()) return null
+  const userId = getStoredSession()?.user.id
+  return new Set(org.workItems.filter((w) => w.assigneeId === userId).map((w) => w.projectId))
 }
 
 function toSession(user: StoredUser, organization: Organization): Session {
@@ -526,7 +549,8 @@ export const mockApi: ApiClient = {
   async listProjects() {
     await delay()
     const org = currentOrg(loadDb())
-    return org.projects
+    const visible = visibleProjectIds(org)
+    return visible ? org.projects.filter((p) => visible.has(p.id)) : org.projects
   },
 
   async createProject(input) {
@@ -563,7 +587,9 @@ export const mockApi: ApiClient = {
   async listWorkItems(projectId) {
     await delay()
     const org = currentOrg(loadDb())
-    return projectId ? org.workItems.filter((w) => w.projectId === projectId) : org.workItems
+    const visible = visibleProjectIds(org)
+    if (projectId && visible && !visible.has(projectId)) throw new ApiError('Project not found.', 404)
+    return org.workItems.filter((w) => (!projectId || w.projectId === projectId) && (!visible || visible.has(w.projectId)))
   },
 
   async createWorkItem(input) {
@@ -571,7 +597,10 @@ export const mockApi: ApiClient = {
     const db = loadDb()
     const org = currentOrg(db)
     if (!input.title.trim()) throw new ApiError('Title is required.')
-    const item: WorkItem = { ...input, id: newId(), createdAt: now(), updatedAt: now() }
+    const visible = visibleProjectIds(org)
+    if (visible && !visible.has(input.projectId)) throw new ApiError('Choose a valid project.')
+    const createdById = getStoredSession()?.user.id ?? null
+    const item: WorkItem = { ...input, id: newId(), createdById, createdAt: now(), updatedAt: now() }
     org.workItems.push(item)
     saveDb(db)
     return item
@@ -583,7 +612,19 @@ export const mockApi: ApiClient = {
     const org = currentOrg(db)
     const index = org.workItems.findIndex((w) => w.id === id)
     if (index === -1) throw new ApiError('Item not found.', 404)
-    org.workItems[index] = { ...org.workItems[index], ...changes, updatedAt: now() }
+    const current = org.workItems[index]
+    const userId = getStoredSession()?.user.id
+    // Employees: full edits on their own tasks; on others only the status of a task assigned to them.
+    if (!isManagerSession() && current.createdById !== userId) {
+      const changed = (Object.keys(changes) as Array<keyof typeof changes>).filter(
+        (key) => JSON.stringify(changes[key] ?? null) !== JSON.stringify(current[key] ?? null),
+      )
+      if (current.assigneeId !== userId) throw new ApiError('You can only update tasks assigned to you.', 403)
+      if (changed.some((key) => key !== 'statusId')) {
+        throw new ApiError('You can only change the status of a task a manager created.', 403)
+      }
+    }
+    org.workItems[index] = { ...current, ...changes, updatedAt: now() }
     saveDb(db)
     return org.workItems[index]
   },
@@ -592,6 +633,11 @@ export const mockApi: ApiClient = {
     await delay()
     const db = loadDb()
     const org = currentOrg(db)
+    const item = org.workItems.find((w) => w.id === id)
+    if (!item) throw new ApiError('Item not found.', 404)
+    if (!isManagerSession() && item.createdById !== getStoredSession()?.user.id) {
+      throw new ApiError('Only a manager can delete this task. You can change its status instead.', 403)
+    }
     org.workItems = org.workItems.filter((w) => w.id !== id)
     saveDb(db)
   },

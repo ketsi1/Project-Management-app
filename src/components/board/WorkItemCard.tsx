@@ -10,11 +10,12 @@ interface WorkItemCardProps {
   statuses: Status[]
   members: Member[]
   onOpen: (item: WorkItem) => void
+  draggable?: boolean
 }
 
 // One card on the board. Draggable between columns, clickable (or Enter) to open the editor.
-export default function WorkItemCard({ item, statuses, members, onOpen }: WorkItemCardProps) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: item.id })
+export default function WorkItemCard({ item, statuses, members, onOpen, draggable = true }: WorkItemCardProps) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: item.id, disabled: !draggable })
   const assignee = members.find((m) => m.id === item.assigneeId)
   const overdue = isOverdue(item, statuses)
 

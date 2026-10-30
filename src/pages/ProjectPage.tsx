@@ -14,6 +14,7 @@ import { useWorkspace } from '../context/workspaceContext'
 import { onRealtime } from '../realtime/socket'
 import type { Priority, WorkItem } from '../types'
 import { cn, completion, priorityLabels } from '../utils/format'
+import { taskAccess } from '../utils/permissions'
 
 type View = 'board' | 'list'
 
@@ -147,10 +148,13 @@ function ProjectBoard({ projectId }: { projectId: string }) {
                 </Button>
               </>
             )}
-            <Button onClick={() => openEditor(null)} className="max-sm:flex-1">
-              <Icon name="plus" className="h-4 w-4" />
-              New {terminology.task}
-            </Button>
+            {/* Only managers create tasks. */}
+            {isManager && (
+              <Button onClick={() => openEditor(null)} className="max-sm:flex-1">
+                <Icon name="plus" className="h-4 w-4" />
+                New {terminology.task}
+              </Button>
+            )}
           </div>
         </div>
       </header>
@@ -278,7 +282,14 @@ function ProjectBoard({ projectId }: { projectId: string }) {
       ) : (
         <div key={view} className="animate-fade-in">
           {view === 'board' ? (
-            <BoardView statuses={statuses} items={visibleItems} members={members} onMove={handleMove} onOpen={openEditor} />
+            <BoardView
+              statuses={statuses}
+              items={visibleItems}
+              members={members}
+              onMove={handleMove}
+              onOpen={openEditor}
+              canMove={(item) => taskAccess(item, session, isManager) !== 'view'}
+            />
           ) : (
             <ListView items={visibleItems} statuses={statuses} members={members} fields={fields} onOpen={openEditor} />
           )}

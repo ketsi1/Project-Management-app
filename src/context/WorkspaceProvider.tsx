@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { api } from '../api'
 import { errorMessage } from '../api/ApiError'
+import { onRealtime } from '../realtime/socket'
 import type { Project, Workspace } from '../types'
 import { WorkspaceContext } from './workspaceContext'
 
@@ -25,6 +26,23 @@ export default function WorkspaceProvider({ children }: { children: ReactNode })
       })
     return () => {
       cancelled = true
+    }
+  }, [])
+
+  // An employee only sees projects where a task is assigned to them, so the project list
+  // can change whenever tasks change, not just when projects do.
+  useEffect(() => {
+    const refresh = () => {
+      api
+        .listProjects()
+        .then(setProjects)
+        .catch(() => undefined) // keep the current list; the next change tries again
+    }
+    const offItems = onRealtime('workItems:changed', refresh)
+    const offProjects = onRealtime('projects:changed', refresh)
+    return () => {
+      offItems()
+      offProjects()
     }
   }, [])
 

@@ -92,38 +92,33 @@ export function PageHero({
   actions?: ReactNode
   accent?: 'indigo' | 'sky'
 }) {
+  // One compact row: title + short subtitle on the left, actions on the right.
   return (
-    <section className="relative overflow-hidden rounded-2xl bg-slate-950 p-5 text-white shadow-card sm:p-7 lg:p-8">
+    <section className="relative overflow-hidden rounded-xl bg-slate-950 px-4 py-3.5 text-white shadow-card sm:px-5 sm:py-4">
       <div
         className={cn(
-          'pointer-events-none absolute -top-24 -right-16 h-72 w-72 rounded-full blur-3xl',
+          'pointer-events-none absolute -top-16 -right-10 h-40 w-40 rounded-full blur-3xl',
           accent === 'indigo' ? 'bg-indigo-600/35' : 'bg-sky-500/30',
         )}
       />
-      <div className="pointer-events-none absolute -bottom-28 left-1/4 h-64 w-64 rounded-full bg-indigo-500/10 blur-3xl" />
-      <div
-        className="pointer-events-none absolute inset-0 opacity-[0.06]"
-        style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 0)', backgroundSize: '22px 22px' }}
-      />
 
-      <div className="relative flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
-        <div className="min-w-0 space-y-2">
-          <span
-            className={cn(
-              'inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider ring-1 ring-inset',
-              accent === 'indigo' ? 'bg-indigo-500/15 text-indigo-200 ring-indigo-400/25' : 'bg-sky-500/15 text-sky-200 ring-sky-400/25',
-            )}
-          >
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
-              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+      <div className="relative flex flex-col gap-3 md:flex-row md:items-center md:justify-between md:gap-6">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <h1 className="text-lg font-bold text-white sm:text-xl">{title}</h1>
+            <span
+              className={cn(
+                'inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider',
+                accent === 'indigo' ? 'text-indigo-200' : 'text-sky-200',
+              )}
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              {eyebrow}
             </span>
-            {eyebrow}
-          </span>
-          <h1 className="text-2xl font-bold text-white sm:text-3xl">{title}</h1>
-          {description && <p className="max-w-2xl text-sm leading-relaxed text-slate-300 sm:text-[15px]">{description}</p>}
+          </div>
+          {description && <p className="mt-0.5 text-[13px] leading-snug text-slate-300">{description}</p>}
         </div>
-        {actions && <div className="flex flex-wrap gap-2 sm:gap-3 xl:shrink-0 xl:flex-nowrap">{actions}</div>}
+        {actions && <div className="flex flex-wrap gap-2 md:shrink-0 md:flex-nowrap">{actions}</div>}
       </div>
     </section>
   )

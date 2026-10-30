@@ -80,6 +80,8 @@ export interface WorkItem {
   assigneeId: string | null
   dueDate: string | null
   customValues: Record<string, string>
+  // Who created the item. Employees may only edit or delete items they created.
+  createdById: string | null
   createdAt: string
   updatedAt: string
 }
@@ -96,7 +98,7 @@ export interface Workspace {
 }
 
 // Input shapes for create and update requests.
-export type WorkItemInput = Omit<WorkItem, 'id' | 'createdAt' | 'updatedAt'>
+export type WorkItemInput = Omit<WorkItem, 'id' | 'createdById' | 'createdAt' | 'updatedAt'>
 export type ProjectInput = Pick<Project, 'name' | 'description'>
 export type StatusInput = Omit<Status, 'id'>
 export type FieldInput = Omit<CustomField, 'id'>
