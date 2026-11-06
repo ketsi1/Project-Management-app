@@ -4,7 +4,7 @@ import { Events } from '../realtime/events.js'
 import { broadcastToOrg } from '../realtime/socket.js'
 import { ApiError } from '../utils/ApiError.js'
 import { newId } from '../utils/time.js'
-import { canSeeProject, isManager, visibleProjectsFilter } from './visibility.js'
+import { canSeeProject, managesAllTasks, seesAllProjects, visibleProjectsFilter } from './visibility.js'
 
 async function findItem(organizationId, id) {
   const rows = await query('SELECT * FROM work_items WHERE id = ? AND organization_id = ?', [id, organizationId])
@@ -16,7 +16,7 @@ async function findItem(organizationId, id) {
 async function findVisibleItem(auth, id) {
   const item = await findItem(auth.organizationId, id)
   if (!item) throw ApiError.notFound('Item not found.')
-  if (!isManager(auth) && !(await canSeeProject(auth, item.projectId))) throw ApiError.notFound('Item not found.')
+  if (!seesAllProjects(auth) && !(await canSeeProject(auth, item.projectId))) throw ApiError.notFound('Item not found.')
   return item
 }
 
@@ -50,18 +50,18 @@ async function assertReferences(organizationId, { projectId, statusId, assigneeI
   await Promise.all(checks)
 }
 
-// Managers get every item. Employees get the items in projects where at least one
+// Roles that see all projects get every item. Everyone else gets the items in projects where at least one
 // item is assigned to them (so project progress still counts the whole project).
 export async function listWorkItems(auth, projectId) {
   const conditions = ['w.organization_id = ?']
   const params = [auth.organizationId]
 
   if (projectId) {
-    if (!isManager(auth) && !(await canSeeProject(auth, projectId))) throw ApiError.notFound('Project not found.')
+    if (!seesAllProjects(auth) && !(await canSeeProject(auth, projectId))) throw ApiError.notFound('Project not found.')
     conditions.push('w.project_id = ?')
     params.push(projectId)
   }
-  if (!isManager(auth)) {
+  if (!seesAllProjects(auth)) {
     const filter = visibleProjectsFilter(auth, 'w.project_id')
     conditions.push(filter.sql)
     params.push(...filter.params)
@@ -75,7 +75,7 @@ export async function createWorkItem(auth, input) {
   const { organizationId } = auth
   await assertReferences(organizationId, input)
   // Employees can only add work to projects they can see.
-  if (!isManager(auth) && !(await canSeeProject(auth, input.projectId))) throw ApiError.badRequest('Choose a valid project.')
+  if (!seesAllProjects(auth) && !(await canSeeProject(auth, input.projectId))) throw ApiError.badRequest('Choose a valid project.')
 
   const id = newId()
   await query(
@@ -115,11 +115,11 @@ const COLUMNS = {
 
 const sameValue = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
 
-// Employees can fully edit items they created. On anyone else's item they may only
+// Without 'tasks.manage_all', people can fully edit items they created. On anyone else's item they may only
 // change the status, and only when the item is assigned to them.
 async function assertCanUpdate(auth, item, changes) {
-  if (isManager(auth) || item.createdById === auth.userId) {
-    if (!isManager(auth) && changes.projectId !== undefined && !(await canSeeProject(auth, changes.projectId))) {
+  if (managesAllTasks(auth) || item.createdById === auth.userId) {
+    if (!seesAllProjects(auth) && changes.projectId !== undefined && !(await canSeeProject(auth, changes.projectId))) {
       throw ApiError.badRequest('Choose a valid project.')
     }
     return
@@ -128,7 +128,7 @@ async function assertCanUpdate(auth, item, changes) {
   const changed = Object.keys(changes).filter((key) => key in COLUMNS && !sameValue(changes[key], item[key]))
   if (item.assigneeId !== auth.userId) throw ApiError.forbidden('You can only update tasks assigned to you.')
   if (changed.some((key) => key !== 'statusId')) {
-    throw ApiError.forbidden('You can only change the status of a task a manager created.')
+    throw ApiError.forbidden('You can only change the status of a task someone else created.')
   }
 }
 
@@ -156,13 +156,13 @@ export async function updateWorkItem(auth, id, changes) {
   return item
 }
 
-// Employees can only delete items they created themselves.
+// Without 'tasks.manage_all', people can only delete items they created themselves.
 export async function deleteWorkItem(auth, id) {
   const { organizationId } = auth
   const item = await findItem(organizationId, id)
   if (!item) throw ApiError.notFound('Item not found.')
-  if (!isManager(auth) && item.createdById !== auth.userId) {
-    throw ApiError.forbidden('Only a manager can delete this task. You can change its status instead.')
+  if (!managesAllTasks(auth) && item.createdById !== auth.userId) {
+    throw ApiError.forbidden('Your role can only delete tasks you created. You can change its status instead.')
   }
   await query('DELETE FROM work_items WHERE id = ? AND organization_id = ?', [id, organizationId])
   broadcastToOrg(organizationId, Events.WORK_ITEMS_CHANGED, { action: 'deleted', id, projectId: item.projectId })

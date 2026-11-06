@@ -42,6 +42,10 @@ export const toMember = (row) => ({
   fullName: row.full_name,
   email: row.email,
   role: row.role,
+  roleId: row.role_id,
+  roleName: row.role_name,
+  // false while an invited person has not chosen a password yet
+  activated: row.activated === undefined ? true : !!row.activated,
 })
 
 export const toProject = (row) => ({
@@ -64,4 +68,38 @@ export const toWorkItem = (row) => ({
   createdById: row.created_by ?? null,
   createdAt: toIso(row.created_at),
   updatedAt: toIso(row.updated_at),
+})
+
+export const toBug = (row) => ({
+  id: row.id,
+  number: row.number,
+  key: `BUG-${row.number}`,
+  projectId: row.project_id,
+  workItemId: row.work_item_id ?? null,
+  title: row.title,
+  description: row.description ?? '',
+  stepsToReproduce: row.steps_to_reproduce ?? '',
+  expectedResult: row.expected_result ?? '',
+  actualResult: row.actual_result ?? '',
+  environment: row.environment ?? '',
+  severity: row.severity,
+  priority: row.priority,
+  status: row.status,
+  resolution: row.resolution ?? null,
+  reporterId: row.reporter_id ?? null,
+  assigneeId: row.assignee_id ?? null,
+  commentCount: Number(row.comment_count ?? 0),
+  resolvedAt: toIso(row.resolved_at),
+  closedAt: toIso(row.closed_at),
+  createdAt: toIso(row.created_at),
+  updatedAt: toIso(row.updated_at),
+})
+
+export const toBugComment = (row) => ({
+  id: row.id,
+  kind: row.kind,
+  authorId: row.author_id ?? null,
+  authorName: row.author_name ?? null,
+  body: row.body,
+  createdAt: toIso(row.created_at),
 })

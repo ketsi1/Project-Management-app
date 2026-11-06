@@ -29,7 +29,7 @@ interface ManagerDashboardProps {
 }
 
 export default function ManagerDashboard({ items, onItemUpdated }: ManagerDashboardProps) {
-  const { session } = useAuth()
+  const { session, can } = useAuth()
   const { workspace, projects, reloadProjects } = useWorkspace()
   const { statuses, members, terminology } = workspace
   const navigate = useNavigate()
@@ -134,14 +134,18 @@ export default function ManagerDashboard({ items, onItemUpdated }: ManagerDashbo
         description={`${workspace.organization.name} · projects, team capacity and deadlines at a glance.`}
         actions={
           <>
-            <button type="button" onClick={() => startNewTask()} className={heroButton.primary}>
-              <Icon name="plus" className="h-4 w-4" />
-              New {terminology.task}
-            </button>
-            <button type="button" onClick={() => setCreatingProject(true)} className={heroButton.secondary}>
-              <Icon name="folder" className="h-4 w-4" />
-              New {terminology.project}
-            </button>
+            {can('tasks.create') && (
+              <button type="button" onClick={() => startNewTask()} className={heroButton.primary}>
+                <Icon name="plus" className="h-4 w-4" />
+                New {terminology.task}
+              </button>
+            )}
+            {can('projects.create') && (
+              <button type="button" onClick={() => setCreatingProject(true)} className={heroButton.secondary}>
+                <Icon name="folder" className="h-4 w-4" />
+                New {terminology.project}
+              </button>
+            )}
           </>
         }
       />
@@ -329,10 +333,12 @@ export default function ManagerDashboard({ items, onItemUpdated }: ManagerDashbo
             title={`${terminology.projects} portfolio`}
             description="Active initiatives and delivery progress across teams."
             action={
-              <Button variant="secondary" size="sm" onClick={() => setCreatingProject(true)}>
-                <Icon name="plus" className="h-3.5 w-3.5" />
-                New {terminology.project}
-              </Button>
+              can('projects.create') && (
+                <Button variant="secondary" size="sm" onClick={() => setCreatingProject(true)}>
+                  <Icon name="plus" className="h-3.5 w-3.5" />
+                  New {terminology.project}
+                </Button>
+              )
             }
           />
 
@@ -342,7 +348,7 @@ export default function ManagerDashboard({ items, onItemUpdated }: ManagerDashbo
                 icon="folder"
                 title="No projects yet"
                 description="Create your first project to start planning work."
-                action={<Button onClick={() => setCreatingProject(true)}>Create your first project</Button>}
+                action={can('projects.create') && <Button onClick={() => setCreatingProject(true)}>Create your first project</Button>}
               />
             </div>
           ) : (
@@ -410,15 +416,17 @@ export default function ManagerDashboard({ items, onItemUpdated }: ManagerDashbo
                         {projectItems.length} {terminology.tasks.toLowerCase()}
                       </span>
                       <div className="flex items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={() => startNewTask(project.id)}
-                          className="relative z-10 inline-flex h-7 items-center gap-1 rounded-md bg-indigo-50 px-2 text-xs font-semibold text-indigo-700 transition-[background-color,scale] hover:bg-indigo-100 active:scale-95"
-                          aria-label={`Add ${terminology.task.toLowerCase()} to ${project.name}`}
-                        >
-                          <Icon name="plus" className="h-3.5 w-3.5" />
-                          Add {terminology.task.toLowerCase()}
-                        </button>
+                        {can('tasks.create') && (
+                          <button
+                            type="button"
+                            onClick={() => startNewTask(project.id)}
+                            className="relative z-10 inline-flex h-7 items-center gap-1 rounded-md bg-indigo-50 px-2 text-xs font-semibold text-indigo-700 transition-[background-color,scale] hover:bg-indigo-100 active:scale-95"
+                            aria-label={`Add ${terminology.task.toLowerCase()} to ${project.name}`}
+                          >
+                            <Icon name="plus" className="h-3.5 w-3.5" />
+                            Add {terminology.task.toLowerCase()}
+                          </button>
+                        )}
                         <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-400 transition-colors group-hover:text-indigo-600">
                           Open board
                           <Icon name="arrowRight" className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />

@@ -30,7 +30,7 @@ export default function ProjectPage() {
 
 function ProjectBoard({ projectId }: { projectId: string }) {
   const navigate = useNavigate()
-  const { session, isManager } = useAuth()
+  const { session, can } = useAuth()
   const { workspace, projects, reloadProjects } = useWorkspace()
   const { statuses, members, fields, terminology } = workspace
   const project = projects.find((p) => p.id === projectId)
@@ -136,20 +136,23 @@ function ProjectBoard({ projectId }: { projectId: string }) {
           </div>
 
           <div className="flex flex-wrap items-center gap-2 lg:shrink-0">
-            {isManager && (
-              <>
-                <Button variant="secondary" onClick={() => setEditingProject(true)}>
-                  <Icon name="pencil" className="h-3.5 w-3.5" />
-                  Edit
-                </Button>
-                <Button variant="dangerGhost" onClick={handleDeleteProject}>
-                  <Icon name="trash" className="h-3.5 w-3.5" />
-                  Delete
-                </Button>
-              </>
+            <Button variant="secondary" onClick={() => navigate(`/app/bugs?project=${projectId}`)}>
+              <Icon name="bug" className="h-3.5 w-3.5" />
+              Bugs
+            </Button>
+            {can('projects.update') && (
+              <Button variant="secondary" onClick={() => setEditingProject(true)}>
+                <Icon name="pencil" className="h-3.5 w-3.5" />
+                Edit
+              </Button>
             )}
-            {/* Only managers create tasks. */}
-            {isManager && (
+            {can('projects.delete') && (
+              <Button variant="dangerGhost" onClick={handleDeleteProject}>
+                <Icon name="trash" className="h-3.5 w-3.5" />
+                Delete
+              </Button>
+            )}
+            {can('tasks.create') && (
               <Button onClick={() => openEditor(null)} className="max-sm:flex-1">
                 <Icon name="plus" className="h-4 w-4" />
                 New {terminology.task}
@@ -288,7 +291,7 @@ function ProjectBoard({ projectId }: { projectId: string }) {
               members={members}
               onMove={handleMove}
               onOpen={openEditor}
-              canMove={(item) => taskAccess(item, session, isManager) !== 'view'}
+              canMove={(item) => taskAccess(item, session, can('tasks.manage_all')) !== 'view'}
             />
           ) : (
             <ListView items={visibleItems} statuses={statuses} members={members} fields={fields} onOpen={openEditor} />

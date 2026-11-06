@@ -19,7 +19,11 @@ export async function acceptInvite(req, res) {
   res.json(await authService.acceptInvite(req.valid.body, requestMeta(req)))
 }
 
-// Who am I? Handy for checking a stored token is still valid.
+// Who am I, and what may I do right now? The frontend calls this to refresh permissions.
 export function me(req, res) {
-  res.json({ user: req.auth.user, organizationId: req.auth.organizationId, role: req.auth.role })
+  res.json(authService.currentSession(req.auth))
+}
+
+export async function demoAccounts(_req, res) {
+  res.json(await authService.listDemoAccounts())
 }

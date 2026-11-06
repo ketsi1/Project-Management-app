@@ -23,10 +23,10 @@ interface WorkItemModalProps {
 // always starts fresh with the right values.
 export default function WorkItemModal({ projectId, item, defaultStatusId, onClose, onSaved }: WorkItemModalProps) {
   const { workspace, projects } = useWorkspace()
-  const { session, isManager } = useAuth()
+  const { session, isManager, can } = useAuth()
   const { statuses, members, fields, terminology } = workspace
-  // Employees can only change the status of a manager's task, and only look at a teammate's.
-  const access = taskAccess(item, session, isManager)
+  // Without 'tasks.manage_all' you can only change the status of someone else's task assigned to you.
+  const access = taskAccess(item, session, can('tasks.manage_all'))
   const locked = access !== 'full'
   const task = terminology.task.toLowerCase()
 
@@ -36,7 +36,8 @@ export default function WorkItemModal({ projectId, item, defaultStatusId, onClos
   const [description, setDescription] = useState(item?.description ?? '')
   const [statusId, setStatusId] = useState(item?.statusId ?? defaultStatusId)
   const [priority, setPriority] = useState<Priority>(item?.priority ?? 'medium')
-  const [assigneeId, setAssigneeId] = useState(item?.assigneeId ?? '')
+  // People who only see their own tasks get new ones assigned to themselves, so they can find them.
+  const [assigneeId, setAssigneeId] = useState(item?.assigneeId ?? (isManager ? '' : (session?.user.id ?? '')))
   const [dueDate, setDueDate] = useState(item?.dueDate ?? '')
   const [customValues, setCustomValues] = useState<Record<string, string>>(item?.customValues ?? {})
   const [saving, setSaving] = useState(false)

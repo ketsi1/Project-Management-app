@@ -7,19 +7,28 @@ import { newId } from '../utils/time.js'
 
 // --- Workspace ----------------------------------------------------------------
 
-// Only approved members appear in 'members' (assignee lists, team views). Managers also get
-// 'pendingMembers': sign-ups waiting for approval. Employees always get an empty list.
-export async function getWorkspace(organizationId, { isManager = false } = {}) {
-  const [orgRows, statusRows, fieldRows, memberRows] = await Promise.all([
+// Only approved members appear in 'members' (assignee lists, team views). People who can approve
+// sign-ups also get 'pendingMembers'; everyone else gets an empty list.
+// 'roles' lists the organization's roles (name only) for pickers and labels.
+export async function getWorkspace(organizationId, { includePending = false } = {}) {
+  const [orgRows, statusRows, fieldRows, memberRows, roleRows] = await Promise.all([
     query('SELECT * FROM organizations WHERE id = ?', [organizationId]),
     query('SELECT * FROM statuses WHERE organization_id = ? ORDER BY position ASC, created_at ASC', [organizationId]),
     query('SELECT * FROM custom_fields WHERE organization_id = ? ORDER BY created_at ASC', [organizationId]),
     query(
-      `SELECT u.id, u.full_name, u.email, m.role, m.status
-         FROM organization_members m JOIN users u ON u.id = m.user_id
+      `SELECT u.id, u.full_name, u.email, u.password_hash IS NOT NULL AS activated,
+              r.slug AS role, r.id AS role_id, r.name AS role_name, m.status
+         FROM organization_members m
+         JOIN users u ON u.id = m.user_id
+         JOIN roles r ON r.id = m.role_id
         WHERE m.organization_id = ? AND (m.status = 'active' OR ?)
-        ORDER BY FIELD(m.role, 'owner', 'admin', 'member'), u.full_name ASC`,
-      [organizationId, isManager],
+        ORDER BY FIELD(r.slug, 'owner', 'admin', 'manager', 'member'), u.full_name ASC`,
+      [organizationId, includePending],
+    ),
+    query(
+      `SELECT id, slug, name FROM roles WHERE organization_id = ?
+        ORDER BY FIELD(slug, 'owner', 'admin', 'manager', 'member') = 0, FIELD(slug, 'owner', 'admin', 'manager', 'member'), name`,
+      [organizationId],
     ),
   ])
   if (orgRows.length === 0) throw ApiError.notFound('Organization not found.')
@@ -31,6 +40,7 @@ export async function getWorkspace(organizationId, { isManager = false } = {}) {
     fields: fieldRows.map(toField),
     members: memberRows.filter((r) => r.status === 'active').map(toMember),
     pendingMembers: memberRows.filter((r) => r.status === 'pending').map(toMember),
+    roles: roleRows.map((r) => ({ id: r.id, slug: r.slug, name: r.name })),
   }
 }
 

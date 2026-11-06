@@ -14,7 +14,7 @@ import { isOverdue, priorityLabels } from '../utils/format'
 // Every task in one place, grouped under its project.
 // Managers see the whole organization; employees see only their own tasks.
 export default function TasksPage() {
-  const { isManager } = useAuth()
+  const { isManager, can } = useAuth()
   const { workspace, projects } = useWorkspace()
   const { statuses, members, fields, terminology } = workspace
   const { items, loading, error, reload } = useWorkItems()
@@ -67,8 +67,7 @@ export default function TasksPage() {
               : `Everything assigned to you, grouped by ${terminology.project.toLowerCase()}.`}
           </p>
         </div>
-        {/* Only managers create tasks. */}
-        {isManager && (
+        {can('tasks.create') && (
           <Button onClick={() => setCreating(true)}>
             <Icon name="plus" className="h-4 w-4" />
             New {terminology.task.toLowerCase()}

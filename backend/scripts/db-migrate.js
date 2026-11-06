@@ -4,6 +4,7 @@ import { readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { connect, databaseDir, runScript, runSqlFile } from './lib/sql.js'
+import { syncAccessControl } from '../src/services/accessControl.js'
 
 export async function ensureMigrationsTable(connection) {
   await connection.query(
@@ -28,6 +29,9 @@ async function migrate() {
       await runSqlFile(connection, path.join('migrations', file))
       await connection.query('INSERT INTO schema_migrations (name) VALUES (?)', [file])
     }
+    // Permissions live in code (src/auth/permissions.js): keep the tables in step with it.
+    const { permissionCount, organizationCount } = await syncAccessControl(connection)
+    console.info(`  ✓ ${permissionCount} permissions, default roles for ${organizationCount} organization(s)`)
   } finally {
     await connection.end()
   }

@@ -1,6 +1,10 @@
 import { Navigate, Route, Routes } from 'react-router'
-import { ManagerOnlyRoute, ProtectedRoute, PublicOnlyRoute } from './components/layout/RouteGuards'
+import { ProtectedRoute, PublicOnlyRoute, RequirePermission } from './components/layout/RouteGuards'
+import AcceptInvitePage from './pages/AcceptInvitePage'
+import { SETTINGS_PERMISSIONS } from './utils/permissions'
 import ApprovalsPage from './pages/ApprovalsPage'
+import BugDetailPage from './pages/BugDetailPage'
+import BugsPage from './pages/BugsPage'
 import DashboardPage from './pages/DashboardPage'
 import DeadlinesPage from './pages/DeadlinesPage'
 import TasksPage from './pages/TasksPage'
@@ -17,6 +21,7 @@ export default function App() {
       <Route element={<PublicOnlyRoute />}>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/accept-invite" element={<AcceptInvitePage />} />
       </Route>
 
       <Route path="/app" element={<ProtectedRoute />}>
@@ -25,9 +30,17 @@ export default function App() {
         {/* Shared tabs: each role only sees its own scope (managers: everyone, employees: themselves). */}
         <Route path="tasks" element={<TasksPage />} />
         <Route path="deadlines" element={<DeadlinesPage />} />
-        <Route element={<ManagerOnlyRoute />}>
+        {/* Everyone can open bugs; each person sees the bugs their role allows. */}
+        <Route path="bugs" element={<BugsPage />} />
+        <Route path="bugs/:bugId" element={<BugDetailPage />} />
+        {/* Each page needs a permission from the person's role (see Settings → Roles). */}
+        <Route element={<RequirePermission anyOf={['members.view']} />}>
           <Route path="team" element={<TeamPage />} />
+        </Route>
+        <Route element={<RequirePermission anyOf={['members.approve']} />}>
           <Route path="approvals" element={<ApprovalsPage />} />
+        </Route>
+        <Route element={<RequirePermission anyOf={SETTINGS_PERMISSIONS} />}>
           <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Route>

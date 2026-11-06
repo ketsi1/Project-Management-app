@@ -2,7 +2,7 @@ import { resolveToken } from '../auth/sessionStore.js'
 import { ApiError } from '../utils/ApiError.js'
 
 // Requires "Authorization: Bearer <token>" and puts the caller on req.auth:
-// { userId, organizationId, role, sessionId, user }.
+// { userId, organizationId, role, roleId, roleName, permissions, sessionId, user }.
 export async function authenticate(req, _res, next) {
   const header = req.get('authorization') ?? ''
   const [scheme, token] = header.split(' ')
@@ -15,14 +15,15 @@ export async function authenticate(req, _res, next) {
   next()
 }
 
-// Allows the request only for the listed roles. Use after `authenticate`.
-export function requireRole(...roles) {
+// True when the caller's role has the permission (see auth/permissions.js for the list).
+export const can = (auth, permission) => !!auth?.permissions?.includes(permission)
+
+// Allows the request only when the caller's role has every listed permission. Use after `authenticate`.
+export function requirePermission(...permissions) {
   return (req, _res, next) => {
-    if (!req.auth || !roles.includes(req.auth.role)) {
-      throw ApiError.forbidden('Only owners and admins can do this.')
+    if (!permissions.every((permission) => can(req.auth, permission))) {
+      throw ApiError.forbidden('Your role does not allow this.')
     }
     next()
   }
 }
-
-export const requireManager = requireRole('owner', 'admin')

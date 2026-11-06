@@ -36,6 +36,9 @@ export const httpApi: ApiClient = {
   register: (input) => request('POST', '/auth/register', input), // → { pending, message } (no login)
   login: (input) => request('POST', '/auth/login', input), // → Session
   logout: () => request('POST', '/auth/logout'), // → 204
+  me: () => request('GET', '/auth/me'), // → SessionInfo
+  acceptInvite: (token, password) => request('POST', '/auth/accept-invite', { token, password }), // → Session
+  demoAccounts: () => request('GET', '/auth/demo-accounts'), // → DemoAccount[]
 
   getWorkspace: () => request('GET', '/workspace'), // → Workspace
   updateOrganization: (name, terminology) =>
@@ -49,9 +52,16 @@ export const httpApi: ApiClient = {
   createField: (input) => request('POST', '/fields', input), // → CustomField
   deleteField: (id) => request('DELETE', `/fields/${id}`), // → 204
 
-  inviteMember: (input) => request('POST', '/members', input), // → Member
+  inviteMember: (input) => request('POST', '/members', input), // → InviteResult
   approveMember: (id) => request('POST', `/members/${id}/approve`), // → 204
+  updateMemberRole: (id, roleId) => request('PUT', `/members/${id}/role`, { roleId }), // → { role }
   removeMember: (id) => request('DELETE', `/members/${id}`), // → 204 (also rejects a pending sign-up)
+
+  listPermissions: () => request('GET', '/permissions'), // → PermissionInfo[]
+  listRoles: () => request('GET', '/roles'), // → RoleDetail[]
+  createRole: (input) => request('POST', '/roles', input), // → RoleDetail
+  updateRole: (id, input) => request('PUT', `/roles/${id}`, input), // → RoleDetail
+  deleteRole: (id) => request('DELETE', `/roles/${id}`), // → 204
 
   listProjects: () => request('GET', '/projects'), // → Project[]
   createProject: (input) => request('POST', '/projects', input), // → Project
@@ -63,4 +73,11 @@ export const httpApi: ApiClient = {
   createWorkItem: (input) => request('POST', '/work-items', input), // → WorkItem
   updateWorkItem: (id, changes) => request('PATCH', `/work-items/${id}`, changes), // → WorkItem
   deleteWorkItem: (id) => request('DELETE', `/work-items/${id}`), // → 204
+
+  listBugs: (projectId) => request('GET', projectId ? `/bugs?projectId=${projectId}` : '/bugs'), // → Bug[]
+  getBug: (id) => request('GET', `/bugs/${id}`), // → BugDetail
+  createBug: (input) => request('POST', '/bugs', input), // → Bug
+  updateBug: (id, changes) => request('PATCH', `/bugs/${id}`, changes), // → Bug
+  deleteBug: (id) => request('DELETE', `/bugs/${id}`), // → 204
+  addBugComment: (id, body) => request('POST', `/bugs/${id}/comments`, { body }), // → BugComment
 }

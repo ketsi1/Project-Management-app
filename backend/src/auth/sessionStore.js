@@ -21,16 +21,22 @@ export async function revokeSession(sessionId) {
 }
 
 // Checks the token's signature, then that its session is still active and the user is still
-// an approved (active) member of the organization. Returns the caller's identity and *current* role, or null.
+// an approved (active) member of the organization. Returns the caller's identity and *current* role
+// and permissions (read on every request, so role changes apply immediately), or null.
 export async function resolveToken(token) {
   const claims = verifyAccessToken(token)
   if (!claims) return null
 
   const rows = await query(
-    `SELECT u.id AS userId, u.full_name AS fullName, u.email, m.organization_id AS organizationId, m.role
+    `SELECT u.id AS userId, u.full_name AS fullName, u.email, m.organization_id AS organizationId,
+            r.id AS roleId, r.slug AS role, r.name AS roleName,
+            (SELECT GROUP_CONCAT(p.\`key\` ORDER BY p.\`key\`)
+               FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id
+              WHERE rp.role_id = r.id) AS permissions
        FROM auth_sessions s
        JOIN users u ON u.id = s.user_id
        JOIN organization_members m ON m.user_id = s.user_id AND m.organization_id = s.organization_id
+       JOIN roles r ON r.id = m.role_id
       WHERE s.id = ? AND s.user_id = ? AND s.organization_id = ?
         AND m.status = 'active'
         AND s.revoked_at IS NULL AND s.expires_at > CURRENT_TIMESTAMP`,
@@ -44,6 +50,9 @@ export async function resolveToken(token) {
     userId: row.userId,
     organizationId: row.organizationId,
     role: row.role,
+    roleId: row.roleId,
+    roleName: row.roleName,
+    permissions: row.permissions ? row.permissions.split(',') : [],
     user: { id: row.userId, fullName: row.fullName, email: row.email },
   }
 }

@@ -8,6 +8,9 @@
 
 USE pm_database;
 
+-- Match the tables' collation so @variables and text values compare cleanly with columns.
+SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
+
 -- Define fixed UUIDs for deterministic seed data
 SET @org_id = '11111111-1111-1111-1111-111111111111';
 
@@ -51,14 +54,25 @@ VALUES
   (@user_david, 'David Kim', 'david@acme.com', @pw_david)
 ON DUPLICATE KEY UPDATE full_name = VALUES(full_name), password_hash = VALUES(password_hash);
 
--- 3. Link Users to Organization with Roles
--- owner/admin -> manager view only; member -> employee view only.
-INSERT INTO organization_members (id, organization_id, user_id, role, status)
+-- 3. Roles, then link Users to the Organization with a Role.
+-- The role rows are created here so memberships can point at them; their permissions are
+-- filled in by `npm run db:seed` / `npm run seed:roles` (from backend/src/auth/permissions.js).
+INSERT IGNORE INTO roles (id, organization_id, slug, name, description, is_system)
 VALUES
-  ('77777777-7777-7777-7777-777777777771', @org_id, @user_alex, 'owner', 'active'),
-  ('77777777-7777-7777-7777-777777777772', @org_id, @user_sarah, 'member', 'active'),
-  ('77777777-7777-7777-7777-777777777773', @org_id, @user_david, 'member', 'active')
-ON DUPLICATE KEY UPDATE role = VALUES(role), status = VALUES(status);
+  (UUID(), @org_id, 'owner', 'Owner', 'Full control of the organization. There is one owner and they cannot be removed.', TRUE),
+  (UUID(), @org_id, 'admin', 'Admin', 'Runs the workspace: people, roles, settings, projects and all tasks.', TRUE),
+  (UUID(), @org_id, 'manager', 'Project Manager', 'Plans projects and manages everyone’s tasks, but not people or settings.', FALSE),
+  (UUID(), @org_id, 'member', 'Member', 'Works on the tasks assigned to them and can add their own.', TRUE);
+
+SET @role_owner = (SELECT id FROM roles WHERE organization_id = @org_id AND slug = 'owner');
+SET @role_member = (SELECT id FROM roles WHERE organization_id = @org_id AND slug = 'member');
+
+INSERT INTO organization_members (id, organization_id, user_id, role_id, status)
+VALUES
+  ('77777777-7777-7777-7777-777777777771', @org_id, @user_alex, @role_owner, 'active'),
+  ('77777777-7777-7777-7777-777777777772', @org_id, @user_sarah, @role_member, 'active'),
+  ('77777777-7777-7777-7777-777777777773', @org_id, @user_david, @role_member, 'active')
+ON DUPLICATE KEY UPDATE role_id = VALUES(role_id), status = VALUES(status);
 
 -- 4. Create Default Statuses (Board Columns)
 INSERT INTO statuses (id, organization_id, name, category, color, position)
@@ -182,3 +196,46 @@ VALUES
     @user_alex
   )
 ON DUPLICATE KEY UPDATE title = VALUES(title), created_by = VALUES(created_by);
+
+-- 9. Sample bugs (bug tracking). Each is added once; numbers continue after any existing bugs.
+SET @n = (SELECT COALESCE(MAX(number), 0) + 1 FROM bugs WHERE organization_id = @org_id);
+INSERT INTO bugs (id, organization_id, project_id, work_item_id, number, title, description, steps_to_reproduce, expected_result, actual_result, environment, severity, priority, status, reporter_id, assignee_id)
+SELECT '99999999-9999-9999-9999-999999999901', @org_id, @proj_web, NULL, @n,
+  'Checkout button does nothing on Safari',
+  'Customers on Safari cannot finish an order.',
+  '1. Open the site in Safari 17\n2. Add any product to the cart\n3. Click "Checkout"',
+  'The checkout page opens.',
+  'Nothing happens. The console shows "TypeError: undefined is not an object".',
+  'Safari 17 / macOS 14', 'critical', 'urgent', 'in_progress', @user_sarah, @user_david
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM bugs WHERE id = '99999999-9999-9999-9999-999999999901');
+
+SET @n = (SELECT COALESCE(MAX(number), 0) + 1 FROM bugs WHERE organization_id = @org_id);
+INSERT INTO bugs (id, organization_id, project_id, work_item_id, number, title, description, steps_to_reproduce, expected_result, actual_result, environment, severity, priority, status, reporter_id, assignee_id)
+SELECT '99999999-9999-9999-9999-999999999902', @org_id, @proj_web, NULL, @n,
+  'Footer links overlap on small phones',
+  '',
+  '1. Open the home page on a 320px wide screen\n2. Scroll to the footer',
+  'Links wrap onto separate lines.',
+  'Links overlap and cannot be tapped.',
+  'iPhone SE, Chrome', 'minor', 'low', 'open', @user_david, NULL
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM bugs WHERE id = '99999999-9999-9999-9999-999999999902');
+
+SET @n = (SELECT COALESCE(MAX(number), 0) + 1 FROM bugs WHERE organization_id = @org_id);
+INSERT INTO bugs (id, organization_id, project_id, work_item_id, number, title, description, steps_to_reproduce, expected_result, actual_result, environment, severity, priority, status, resolution, reporter_id, assignee_id, resolved_at)
+SELECT '99999999-9999-9999-9999-999999999903', @org_id, @proj_app, NULL, @n,
+  'App crashes when uploading a profile photo',
+  'Happens with photos larger than 10 MB.',
+  '1. Open Profile\n2. Tap "Change photo"\n3. Choose a photo over 10 MB',
+  'The photo is resized and saved.',
+  'The app closes.',
+  'Android 14, app v0.3.1', 'major', 'high', 'resolved', 'fixed', @user_alex, @user_sarah, CURRENT_TIMESTAMP
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM bugs WHERE id = '99999999-9999-9999-9999-999999999903');
+
+INSERT IGNORE INTO bug_comments (id, organization_id, bug_id, author_id, kind, body)
+VALUES
+  ('99999999-9999-9999-9999-99999999c001', @org_id, '99999999-9999-9999-9999-999999999901', @user_sarah, 'event', 'reported this bug'),
+  ('99999999-9999-9999-9999-99999999c002', @org_id, '99999999-9999-9999-9999-999999999901', @user_alex, 'event', 'assigned this bug to David Kim'),
+  ('99999999-9999-9999-9999-99999999c003', @org_id, '99999999-9999-9999-9999-999999999901', @user_david, 'comment', 'Reproduced. It comes from the payment script loading before the cart. Working on a fix.'),
+  ('99999999-9999-9999-9999-99999999c004', @org_id, '99999999-9999-9999-9999-999999999902', @user_david, 'event', 'reported this bug'),
+  ('99999999-9999-9999-9999-99999999c005', @org_id, '99999999-9999-9999-9999-999999999903', @user_alex, 'event', 'reported this bug'),
+  ('99999999-9999-9999-9999-99999999c006', @org_id, '99999999-9999-9999-9999-999999999903', @user_sarah, 'event', 'marked this Resolved (Fixed)');

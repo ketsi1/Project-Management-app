@@ -5,10 +5,9 @@ import Icon from '../components/ui/Icon'
 import { useAuth } from '../context/authContext'
 import { useWorkspace } from '../context/workspaceContext'
 import { useWorkItems } from '../hooks/useWorkItems'
-import type { Priority, Role } from '../types'
+import type { Priority } from '../types'
 import { categoryOf, cn, completion, formatDate, isOverdue } from '../utils/format'
 
-const roleLabels: Record<Role, string> = { owner: 'Manager', admin: 'Manager', member: 'Employee' }
 const priorityRank: Record<Priority, number> = { urgent: 4, high: 3, medium: 2, low: 1 }
 
 // Manager-only: who is working on what, and who is overloaded or falling behind.
@@ -78,7 +77,7 @@ export default function TeamPage() {
                     )}
                   </p>
                   <p className="truncate text-xs text-slate-500">
-                    {roleLabels[member.role]} · {member.email}
+                    {member.roleName} · {member.email}
                   </p>
                 </div>
                 {overdue.length > 0 && (

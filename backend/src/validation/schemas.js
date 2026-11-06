@@ -28,7 +28,6 @@ const newPassword = z
   .min(8, 'Password must be at least 8 characters.')
   .refine((value) => Buffer.byteLength(value, 'utf8') <= 72, 'Password must be at most 72 bytes.')
 
-export const roles = ['owner', 'admin', 'member']
 export const statusCategories = ['not_started', 'active', 'done', 'cancelled']
 export const priorities = ['low', 'medium', 'high', 'urgent']
 export const fieldTypes = ['text', 'number', 'date', 'select']
@@ -98,10 +97,27 @@ export const fieldSchema = z
 
 // --- Members ------------------------------------------------------------------
 
+// Without a password the person gets an invitation link to choose one themselves.
 export const inviteSchema = z.object({
   fullName: text('Full name', 150),
   email,
-  role: z.enum(roles, { error: 'Choose a valid role.' }),
+  roleId: id('Role'),
+  password: newPassword.optional().or(z.literal('').transform(() => undefined)),
+})
+
+export const memberRoleSchema = z.object({
+  roleId: id('Role'),
+})
+
+// --- Roles --------------------------------------------------------------------
+
+export const roleSchema = z.object({
+  name: text('Role name', 100),
+  description: optionalText('Description', 500).default(''),
+  permissions: z
+    .array(z.string().max(100), { error: 'Permissions must be a list.' })
+    .max(200)
+    .transform((keys) => [...new Set(keys)]),
 })
 
 // --- Projects -----------------------------------------------------------------
@@ -150,4 +166,55 @@ export const updateWorkItemSchema = z
 
 export const listWorkItemsQuery = z.object({
   projectId: id('Project').optional(),
+})
+
+// --- Bugs ---------------------------------------------------------------------
+
+export const bugSeverities = ['critical', 'major', 'minor', 'trivial']
+export const bugStatuses = ['open', 'in_progress', 'resolved', 'closed']
+export const bugResolutions = ['fixed', 'wont_fix', 'duplicate', 'cannot_reproduce', 'by_design']
+
+const optionalId = z.string().trim().max(64).nullable().or(z.literal('').transform(() => null))
+
+const bugFields = {
+  projectId: id('Project'),
+  workItemId: optionalId,
+  title: text('Title', 255),
+  description: optionalText('Description', 20_000),
+  stepsToReproduce: optionalText('Steps to reproduce', 20_000),
+  expectedResult: optionalText('Expected result', 5_000),
+  actualResult: optionalText('Actual result', 5_000),
+  environment: optionalText('Environment', 255),
+  severity: z.enum(bugSeverities, { error: 'Choose a valid severity.' }),
+  priority: z.enum(priorities, { error: 'Choose a valid priority.' }),
+  status: z.enum(bugStatuses, { error: 'Choose a valid status.' }),
+  resolution: z.enum(bugResolutions, { error: 'Choose a valid resolution.' }).nullable(),
+  assigneeId: optionalId,
+}
+
+export const createBugSchema = z.object({
+  projectId: bugFields.projectId,
+  workItemId: bugFields.workItemId.default(null),
+  title: bugFields.title,
+  description: bugFields.description.default(''),
+  stepsToReproduce: bugFields.stepsToReproduce.default(''),
+  expectedResult: bugFields.expectedResult.default(''),
+  actualResult: bugFields.actualResult.default(''),
+  environment: bugFields.environment.default(''),
+  severity: bugFields.severity.default('major'),
+  priority: bugFields.priority.default('medium'),
+  assigneeId: bugFields.assigneeId.default(null),
+})
+
+export const updateBugSchema = z
+  .object(bugFields)
+  .partial()
+  .refine((changes) => Object.keys(changes).length > 0, 'Nothing to update.')
+
+export const listBugsQuery = z.object({
+  projectId: id('Project').optional(),
+})
+
+export const bugCommentSchema = z.object({
+  body: text('Comment', 10_000),
 })

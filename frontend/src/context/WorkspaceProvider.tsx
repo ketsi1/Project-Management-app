@@ -38,11 +38,20 @@ export default function WorkspaceProvider({ children }: { children: ReactNode })
         .then(setProjects)
         .catch(() => undefined) // keep the current list; the next change tries again
     }
+    // Settings, members and roles changed by someone else: reload them too.
+    const reloadWorkspace = () => {
+      api
+        .getWorkspace()
+        .then(setWorkspace)
+        .catch(() => undefined)
+    }
     const offItems = onRealtime('workItems:changed', refresh)
     const offProjects = onRealtime('projects:changed', refresh)
+    const offWorkspace = onRealtime('workspace:changed', reloadWorkspace)
     return () => {
       offItems()
       offProjects()
+      offWorkspace()
     }
   }, [])
 

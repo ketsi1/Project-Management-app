@@ -1,16 +1,22 @@
-// Creates the database from scratch: schema.sql, then seed.sql, then marks every
+// Creates the database from scratch: schema.sql, seed.sql (demo data), the role/permission/admin
+// seeders (scripts/seed), then marks every
 // migration as applied (schema.sql already contains them).
 // WARNING: schema.sql drops and recreates every table, so existing data is lost.
 import { readdir } from 'node:fs/promises'
 import path from 'node:path'
+import { env } from '../src/config/env.js'
 import { connect, databaseDir, runScript, runSqlFile } from './lib/sql.js'
 import { ensureMigrationsTable } from './db-migrate.js'
+import { seedAll } from './seed/index.js'
 
 await runScript('db:setup', async () => {
   const connection = await connect({ withDatabase: false })
   try {
     await runSqlFile(connection, 'schema.sql')
     await runSqlFile(connection, 'seed.sql')
+    await connection.changeUser({ database: env.db.database })
+    // Permissions, roles with their permissions, the admin account and one account per role.
+    await seedAll(connection)
 
     await ensureMigrationsTable(connection)
     const files = (await readdir(path.join(databaseDir, 'migrations'))).filter((f) => f.endsWith('.sql')).sort()

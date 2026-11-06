@@ -3,13 +3,14 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 import { useAuth } from '../../context/authContext'
 import { useWorkspace } from '../../context/workspaceContext'
 import { cn } from '../../utils/format'
+import { SETTINGS_PERMISSIONS } from '../../utils/permissions'
 import ProjectFormModal from '../board/ProjectFormModal'
 import Avatar from '../ui/Avatar'
 import BrandMark from '../ui/BrandMark'
 import Icon, { type IconName } from '../ui/Icon'
 
 export default function AppLayout() {
-  const { session, logout, isManager, activeViewMode } = useAuth()
+  const { session, logout, isManager, can, canAny } = useAuth()
   const { workspace, projects } = useWorkspace()
   const navigate = useNavigate()
   const location = useLocation()
@@ -44,31 +45,20 @@ export default function AppLayout() {
     navigate('/login')
   }
 
-  // Side tabs depend only on the role: managers and employees each get their own set.
+  // Side tabs follow the role's permissions: each page only shows when the role may open it.
   const tasksWord = workspace.terminology.tasks
   const pendingCount = workspace.pendingMembers?.length ?? 0
-  const navItems: Array<{ to: string; label: string; icon: IconName; badge?: number }> =
-    activeViewMode === 'manager'
-      ? [
-          { to: '/app', label: 'Executive Dashboard', icon: 'dashboard' },
-          { to: '/app/tasks', label: `All ${tasksWord}`, icon: 'list' },
-          { to: '/app/deadlines', label: 'Deadlines', icon: 'calendar' },
-          { to: '/app/team', label: 'Team', icon: 'users' },
-          { to: '/app/approvals', label: 'Approvals', icon: 'checkCircle', badge: pendingCount },
-          { to: '/app/settings', label: 'Workspace Settings', icon: 'settings' },
-        ]
-      : [
-          { to: '/app', label: 'My Workstation', icon: 'target' },
-          { to: '/app/tasks', label: `My ${tasksWord}`, icon: 'list' },
-          { to: '/app/deadlines', label: 'Deadlines', icon: 'calendar' },
-        ]
+  const navItems: Array<{ to: string; label: string; icon: IconName; badge?: number; show: boolean }> = [
+    { to: '/app', label: isManager ? 'Executive Dashboard' : 'My Workstation', icon: isManager ? 'dashboard' : 'target', show: true },
+    { to: '/app/tasks', label: `${isManager ? 'All' : 'My'} ${tasksWord}`, icon: 'list', show: true },
+    { to: '/app/deadlines', label: 'Deadlines', icon: 'calendar', show: true },
+    { to: '/app/bugs', label: 'Bugs', icon: 'bug', show: true },
+    { to: '/app/team', label: 'Team', icon: 'users', show: can('members.view') },
+    { to: '/app/approvals', label: 'Approvals', icon: 'checkCircle', badge: pendingCount, show: can('members.approve') },
+    { to: '/app/settings', label: 'Workspace Settings', icon: 'settings', show: canAny(...SETTINGS_PERMISSIONS) },
+  ]
 
-  const roleLabel =
-    session?.role === 'owner'
-      ? 'Owner / Boss'
-      : session?.role === 'admin'
-        ? 'Project Manager'
-        : 'Team Member'
+  const roleLabel = session?.roleName ?? 'Member'
 
   const sidebar = (
     <nav className="flex h-full flex-col" aria-label="Main" onClick={() => setMenuOpen(false)}>
@@ -95,7 +85,7 @@ export default function AppLayout() {
         <div>
           <p className="eyebrow mb-2 px-3">Navigation</p>
           <div className="space-y-0.5">
-            {navItems.map((nav) => (
+            {navItems.filter((nav) => nav.show).map((nav) => (
               <NavLink key={nav.to} to={nav.to} end={nav.to === '/app'} className={linkClass}>
                 <Icon name={nav.icon} className="h-[18px] w-[18px] shrink-0" />
                 <span className="flex-1 truncate">{nav.label}</span>
@@ -111,7 +101,7 @@ export default function AppLayout() {
         <div>
           <div className="mb-2 flex items-center justify-between px-3">
             <p className="eyebrow">{workspace.terminology.projects}</p>
-            {isManager && (
+            {can('projects.create') && (
               <button
                 type="button"
                 onClick={(event) => {

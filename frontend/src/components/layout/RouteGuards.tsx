@@ -1,5 +1,6 @@
 import { Navigate, Outlet } from 'react-router'
 import { useAuth } from '../../context/authContext'
+import type { Permission } from '../../types'
 import WorkspaceProvider from '../../context/WorkspaceProvider'
 import AppLayout from './AppLayout'
 
@@ -14,11 +15,11 @@ export function ProtectedRoute() {
   )
 }
 
-// Manager-only pages (workspace settings). Employees are sent back to their own workstation.
-// The backend enforces the same rule, so this only stops the page from showing.
-export function ManagerOnlyRoute() {
-  const { isManager } = useAuth()
-  if (!isManager) return <Navigate to="/app" replace />
+// Pages that need at least one of the given permissions. Anyone else is sent back to the dashboard.
+// The backend checks the same permissions, so this only stops the page from showing.
+export function RequirePermission({ anyOf }: { anyOf: Permission[] }) {
+  const { canAny } = useAuth()
+  if (!canAny(...anyOf)) return <Navigate to="/app" replace />
   return <Outlet />
 }
 

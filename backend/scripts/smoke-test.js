@@ -5,6 +5,7 @@
 import { io } from 'socket.io-client'
 import { hashPassword } from '../src/auth/password.js'
 import { query, transaction } from '../src/db/pool.js'
+import { ensureDefaultRoles } from '../src/services/accessControl.js'
 import { createStarterContent } from '../src/services/organizationSetup.js'
 import { newId } from '../src/utils/time.js'
 
@@ -16,9 +17,10 @@ async function createTestOrganization({ orgName, fullName, email, password }) {
   await transaction(async (c) => {
     await query('INSERT INTO organizations (id, name) VALUES (?, ?)', [organizationId, orgName], c)
     await query('INSERT INTO users (id, full_name, email, password_hash) VALUES (?, ?, ?, ?)', [ownerId, fullName, email, passwordHash], c)
+    const roleIds = await ensureDefaultRoles(c, organizationId)
     await query(
-      "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES (?, ?, ?, 'owner', 'active')",
-      [newId(), organizationId, ownerId],
+      "INSERT INTO organization_members (id, organization_id, user_id, role_id, status) VALUES (?, ?, ?, ?, 'active')",
+      [newId(), organizationId, ownerId, roleIds.owner],
       c,
     )
     await createStarterContent(c, { organizationId, ownerId })
@@ -138,11 +140,11 @@ try {
     ws,
   )
   const acmeWs = await call('GET', '/workspace', { token: S })
-  check('Acme workspace has 3 members and 2 custom fields', acmeWs.data.members.length === 3 && acmeWs.data.fields.length === 2, acmeWs.data)
+  check('Acme workspace has the seeded members and custom fields', acmeWs.data.members.length >= 3 && acmeWs.data.fields.length >= 2, acmeWs.data)
   const projects = await call('GET', '/projects', { token: T })
   check('new org sees only its own sample project', projects.data.length === 1 && projects.data[0].name === 'Getting started', projects)
   const acmeItems = await call('GET', '/work-items', { token: S })
-  check('Acme member sees the 10 seeded items', acmeItems.data.length === 10, acmeItems.data.length)
+  check('Acme member sees the seeded items', acmeItems.data.length >= 10, acmeItems.data.length)
   const filtered = await call('GET', `/work-items?projectId=55555555-5555-5555-5555-555555555551`, { token: S })
   check('?projectId filter works', filtered.data.length === 5, filtered.data.length)
   const foreign = await call('PATCH', `/work-items/${acmeItems.data[0].id}`, { token: T, body: { title: 'hijack' } })
@@ -205,7 +207,7 @@ try {
   })
   check('member cannot change organization → 403', denied.status === 403 && denied.data.message, denied)
   check('member cannot create a project → 403', (await call('POST', '/projects', { token: S, body: { name: 'x' } })).status === 403)
-  check('member cannot invite → 403', (await call('POST', '/members', { token: S, body: { fullName: 'x', email: 'x@x.io', role: 'member' } })).status === 403)
+  check('member cannot invite → 403', (await call('POST', '/members', { token: S, body: { fullName: 'x', email: 'x@x.io', roleId: acmeWs.data.roles.find((r) => r.slug === 'member')?.id } })).status === 403)
   const memberItem = await call('POST', '/work-items', {
     token: S,
     body: { projectId: '55555555-5555-5555-5555-555555555551', title: 'Smoke (member)', statusId: '33333333-3333-3333-3333-333333333301' },
@@ -271,8 +273,9 @@ try {
   const field = await call('POST', '/fields', { token: T, body: { label: 'Budget', type: 'number', options: [] } })
   check('create field → 201', field.status === 201 && field.data.label === 'Budget', field)
   check('delete field → 204', (await call('DELETE', `/fields/${field.data.id}`, { token: T })).status === 204)
-  const invite = await call('POST', '/members', { token: T, body: { fullName: 'New Person', email: `invitee-${Date.now()}@example.com`, role: 'admin' } })
-  check('invite member → 201 with Member', invite.status === 201 && invite.data.role === 'admin', invite)
+  const roleId = (slug) => ws.data.roles.find((r) => r.slug === slug)?.id
+  const invite = await call('POST', '/members', { token: T, body: { fullName: 'New Person', email: `invitee-${Date.now()}@example.com`, roleId: roleId('admin') } })
+  check('invite member → 201 with Member and an invite link', invite.status === 201 && invite.data.role === 'admin' && /accept-invite/.test(invite.data.inviteLink), invite)
   const invitedLogin = await call('POST', '/auth/login', { body: { email: invite.data.email, password: 'password123' } })
   check('invited member cannot log in before accepting', invitedLogin.status === 401)
   check('remove member → 204', (await call('DELETE', `/members/${invite.data.id}`, { token: T })).status === 204)
@@ -281,6 +284,107 @@ try {
   check('create project → 201', proj.status === 201, proj)
   check('update project → 200', (await call('PUT', `/projects/${proj.data.id}`, { token: T, body: { name: 'Second!', description: 'x' } })).data?.name === 'Second!')
   check('delete project → 204', (await call('DELETE', `/projects/${proj.data.id}`, { token: T })).status === 204)
+
+  console.info('\nRoles & permissions')
+  check('sessions carry role name and permissions', owner.data.permissions?.includes('roles.manage') && owner.data.roleName === 'Owner', owner.data)
+  check('member session has only member permissions', sarah.data.permissions.join() === 'bugs.report,tasks.create', sarah.data.permissions)
+  const admin = await call('POST', '/auth/login', { body: { email: 'admin@acme.com', password: 'Admin@12345' } })
+  check('seeded admin admin@acme.com logs in with role admin', admin.status === 200 && admin.data.role === 'admin', admin)
+  const mgr = await call('POST', '/auth/login', { body: { email: 'manager@acme.com', password: 'Manager@12345' } })
+  check('seeded manager manager@acme.com logs in as Project Manager', mgr.status === 200 && mgr.data.role === 'manager', mgr)
+  const demo = await call('GET', '/auth/demo-accounts')
+  check('login page gets the one-click accounts', demo.status === 200 && demo.data.some((a) => a.email === 'admin@acme.com'), demo)
+  check('member cannot list roles → 403', (await call('GET', '/roles', { token: S })).status === 403)
+  check('manager cannot list roles → 403', (await call('GET', '/roles', { token: mgr.data.token })).status === 403)
+  check(
+    'manager cannot add members → 403',
+    (await call('POST', '/members', { token: mgr.data.token, body: { fullName: 'x', email: 'y@x.io', roleId: roleId('member') } })).status === 403,
+  )
+  const perms = await call('GET', '/permissions', { token: T })
+  check('permission catalog lists 19 permissions', perms.status === 200 && perms.data.length === 19, perms.data?.length)
+  const rolesList = await call('GET', '/roles', { token: T })
+  check('new org has owner/admin/manager/member roles', rolesList.data.map((r) => r.slug).join() === 'owner,admin,manager,member', rolesList.data)
+  check('owner role cannot be edited → 400', (await call('PUT', `/roles/${roleId('owner')}`, { token: T, body: { name: 'Boss', permissions: [] } })).status === 400)
+  check('built-in role cannot be deleted → 400', (await call('DELETE', `/roles/${roleId('member')}`, { token: T })).status === 400)
+  const qaBody = { name: 'QA Lead', description: 'Sees everything', permissions: ['projects.view_all', 'tasks.view_all'] }
+  const bogus = await call('POST', '/roles', { token: T, body: { ...qaBody, permissions: ['bogus'] } })
+  check('unknown permission → 400', bogus.status === 400, bogus)
+  const qa = await call('POST', '/roles', { token: T, body: qaBody })
+  check('create custom role → 201', qa.status === 201 && qa.data.slug === 'qa-lead' && qa.data.permissions.length === 2, qa)
+  const qaEmail = `qa-${stamp}@example.com`
+  const added = await call('POST', '/members', { token: T, body: { fullName: 'Quinn QA', email: qaEmail, roleId: qa.data.id, password: 'quinn-pass-1' } })
+  check('admin adds a member with a password → active right away', added.status === 201 && added.data.activated === true && !added.data.inviteLink, added)
+  const qaLogin = await call('POST', '/auth/login', { body: { email: qaEmail, password: 'quinn-pass-1' } })
+  check('the added member logs in with their role', qaLogin.status === 200 && qaLogin.data.role === 'qa-lead', qaLogin)
+  const Q = qaLogin.data.token
+  const allProjects = (await call('GET', '/projects', { token: T })).data.length
+  check('custom role sees all projects (projects.view_all)', (await call('GET', '/projects', { token: Q })).data.length === allProjects)
+  const noCreate = await call('POST', '/work-items', { token: Q, body: { projectId: 'x', title: 'x', statusId: 'x', priority: 'low', customValues: {} } })
+  check('custom role cannot create tasks (no tasks.create) → 403', noCreate.status === 403, noCreate)
+  check('custom role in use cannot be deleted → 400', (await call('DELETE', `/roles/${qa.data.id}`, { token: T })).status === 400)
+  const grant = await call('PUT', `/roles/${qa.data.id}`, { token: T, body: { ...qaBody, permissions: [...qaBody.permissions, 'projects.create'] } })
+  check('edit role permissions → 200', grant.status === 200 && grant.data.permissions.includes('projects.create'), grant)
+  const qaProject = await call('POST', '/projects', { token: Q, body: { name: 'QA project', description: '' } })
+  check('new permission applies on the very next request', qaProject.status === 201, qaProject)
+  const me = await call('GET', '/auth/me', { token: Q })
+  check('/auth/me returns fresh permissions', me.data.permissions?.includes('projects.create'), me.data)
+  check('change member role → 200', (await call('PUT', `/members/${added.data.id}/role`, { token: T, body: { roleId: roleId('member') } })).status === 200)
+  check('role change applies immediately', (await call('POST', '/projects', { token: Q, body: { name: 'nope', description: '' } })).status === 403)
+  check('cannot give the owner role → 400', (await call('PUT', `/members/${added.data.id}/role`, { token: T, body: { roleId: roleId('owner') } })).status === 400)
+  check('cannot change your own role → 400', (await call('PUT', `/members/${owner.data.user.id}/role`, { token: T, body: { roleId: roleId('member') } })).status === 400)
+  check('remove added member → 204', (await call('DELETE', `/members/${added.data.id}`, { token: T })).status === 204)
+  check('delete unused custom role → 204', (await call('DELETE', `/roles/${qa.data.id}`, { token: T })).status === 204)
+
+  console.info('\nBugs')
+  const memberRole = roleId('member')
+  const addMember = async (name) => {
+    const mail = `${name.toLowerCase()}-${stamp}@example.com`
+    const res = await call('POST', '/members', { token: T, body: { fullName: name, email: mail, roleId: memberRole, password: 'bug-pass-123' } })
+    const login = await call('POST', '/auth/login', { body: { email: mail, password: 'bug-pass-123' } })
+    return { id: res.data.id, token: login.data.token }
+  }
+  const M = await addMember('Rita')
+  const N = await addMember('Nick')
+  const sample = (await call('GET', '/projects', { token: T })).data.find((p) => p.name === 'Getting started')
+  const firstStatus = (await call('GET', '/workspace', { token: T })).data.statuses[0].id
+  // Rita gets a task in the sample project, so she can see that project.
+  await call('POST', '/work-items', { token: T, body: { projectId: sample.id, title: 'Rita task', statusId: firstStatus, assigneeId: M.id } })
+
+  check('no bugs yet', (await call('GET', '/bugs', { token: T })).data.length === 0)
+  const bugBody = { projectId: sample.id, title: 'Save button broken', stepsToReproduce: '1. Click save', severity: 'major' }
+  check('member cannot assign while reporting → 403', (await call('POST', '/bugs', { token: M.token, body: { ...bugBody, assigneeId: M.id } })).status === 403)
+  const bug = await call('POST', '/bugs', { token: M.token, body: bugBody })
+  check('member reports a bug → 201 BUG-1, open', bug.status === 201 && bug.data.key === 'BUG-1' && bug.data.status === 'open' && bug.data.reporterId === M.id, bug)
+  const bug2 = await call('POST', '/bugs', { token: T, body: { ...bugBody, title: 'Second bug' } })
+  check('numbers count up per organization (BUG-2)', bug2.data.key === 'BUG-2', bug2.data)
+  check('reporter cannot change priority → 403', (await call('PATCH', `/bugs/${bug.data.id}`, { token: M.token, body: { priority: 'high' } })).status === 403)
+  check('reporter edits the title → 200', (await call('PATCH', `/bugs/${bug.data.id}`, { token: M.token, body: { title: 'Save button does nothing' } })).data?.title === 'Save button does nothing')
+  const assigned = await call('PATCH', `/bugs/${bug.data.id}`, { token: T, body: { assigneeId: M.id, priority: 'high' } })
+  check('triager assigns and prioritizes → 200', assigned.data?.assigneeId === M.id && assigned.data.priority === 'high', assigned)
+  check('a member who cannot see the project gets 404', (await call('GET', `/bugs/${bug.data.id}`, { token: N.token })).status === 404)
+  check("…and it is not in that member's list", !(await call('GET', '/bugs', { token: N.token })).data.some((b) => b.id === bug.data.id))
+  check('that member cannot change it → 404', (await call('PATCH', `/bugs/${bug.data.id}`, { token: N.token, body: { status: 'closed' } })).status === 404)
+  const otherProject = await call('POST', '/projects', { token: T, body: { name: 'Other', description: '' } })
+  const otherTask = await call('POST', '/work-items', { token: T, body: { projectId: otherProject.data.id, title: 'x', statusId: firstStatus } })
+  check('linking a task from another project → 400', (await call('PATCH', `/bugs/${bug.data.id}`, { token: T, body: { workItemId: otherTask.data.id } })).status === 400)
+  const resolved = await call('PATCH', `/bugs/${bug.data.id}`, { token: M.token, body: { status: 'resolved' } })
+  check('assignee resolves → resolution defaults to fixed', resolved.data?.status === 'resolved' && resolved.data.resolution === 'fixed' && !!resolved.data.resolvedAt, resolved)
+  const comment = await call('POST', `/bugs/${bug.data.id}/comments`, { token: M.token, body: { body: 'Fixed in the latest build.' } })
+  check('comment → 201', comment.status === 201 && comment.data.kind === 'comment' && comment.data.authorName === 'Rita', comment)
+  const reopened = await call('PATCH', `/bugs/${bug.data.id}`, { token: T, body: { status: 'open' } })
+  check('reopen clears the resolution', reopened.data?.status === 'open' && reopened.data.resolution === null && reopened.data.resolvedAt === null, reopened)
+  const detail = await call('GET', `/bugs/${bug.data.id}`, { token: T })
+  const log = detail.data.comments.filter((c) => c.kind === 'event').map((c) => c.body)
+  check(
+    'activity log records the changes',
+    log[0] === 'reported this bug' && log.includes('assigned this bug to Rita') && log.includes('marked this Resolved (Fixed)') && log.includes('reopened this bug'),
+    log,
+  )
+  check('list shows the comment count', (await call('GET', '/bugs', { token: T })).data.find((b) => b.id === bug.data.id)?.commentCount === 1)
+  await call('PATCH', `/bugs/${bug.data.id}`, { token: T, body: { status: 'closed', resolution: 'duplicate' } })
+  check('reporter cannot delete a closed bug → 403', (await call('DELETE', `/bugs/${bug.data.id}`, { token: M.token })).status === 403)
+  check('triager deletes it → 204', (await call('DELETE', `/bugs/${bug.data.id}`, { token: T })).status === 204)
+  check('unknown severity → 400', (await call('POST', '/bugs', { token: T, body: { ...bugBody, severity: 'huge' } })).status === 400)
 
   console.info('\nLogout')
   const disconnected = new Promise((resolve) => ownerSocket.once('disconnect', (reason) => resolve(reason)))

@@ -14,6 +14,13 @@
     "db:setup": "node scripts/db-setup.js",
     "db:migrate": "node scripts/db-migrate.js",
     "db:seed": "node scripts/db-seed.js",
+    "seed": "node scripts/seed/index.js all",
+    "seed:permissions": "node scripts/seed/index.js permissions",
+    "seed:roles": "node scripts/seed/index.js roles",
+    "seed:admin": "node scripts/seed/index.js admin",
+    "seed:users": "node scripts/seed/index.js users",
+    "seed:demo": "node scripts/seed/index.js demo",
+    "seed:reset": "node scripts/seed/index.js all --reset",
     "smoke": "node scripts/smoke-test.js"
   },
   "dependencies": {

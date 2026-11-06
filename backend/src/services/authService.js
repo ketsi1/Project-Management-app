@@ -7,14 +7,19 @@ import { ApiError } from '../utils/ApiError.js'
 import { newId } from '../utils/time.js'
 import { Events } from '../realtime/events.js'
 import { broadcastToOrg } from '../realtime/socket.js'
+import { DEFAULT_MEMBER_SLUG } from '../auth/permissions.js'
+import { demoAccounts, seededAccounts, showDemoAccounts } from '../config/seedAccounts.js'
+import { ensureDefaultRoles, permissionsForRole } from './accessControl.js'
 
-// The Session shape the frontend stores after login/registration.
-function toSession(token, user, organization, role) {
+// The Session shape the frontend stores after login: who you are, your role and what it allows.
+async function toSession(token, account) {
   return {
     token,
-    user: { id: user.id, fullName: user.fullName, email: user.email },
-    organization: { id: organization.id, name: organization.name },
-    role,
+    user: { id: account.id, fullName: account.full_name, email: account.email },
+    organization: { id: account.org_id, name: account.org_name },
+    role: account.role,
+    roleName: account.role_name,
+    permissions: await permissionsForRole(account.role_id),
   }
 }
 
@@ -22,9 +27,10 @@ function toSession(token, user, organization, role) {
 async function findAccountByEmail(email) {
   const rows = await query(
     `SELECT u.id, u.full_name, u.email, u.password_hash,
-            m.role, m.status, o.id AS org_id, o.name AS org_name
+            r.id AS role_id, r.slug AS role, r.name AS role_name, m.status, o.id AS org_id, o.name AS org_name
        FROM users u
        LEFT JOIN organization_members m ON m.user_id = u.id
+       LEFT JOIN roles r ON r.id = m.role_id
        LEFT JOIN organizations o ON o.id = m.organization_id
       WHERE u.email = ?
       ORDER BY m.created_at ASC
@@ -54,14 +60,16 @@ export async function register({ fullName, organizationName, email, password }) 
 
   try {
     await transaction(async (connection) => {
+      // Sign-ups get the default member role (created first if the organization has no roles yet).
+      const roleIds = await ensureDefaultRoles(connection, organizationId)
       await query(
         'INSERT INTO users (id, full_name, email, password_hash) VALUES (?, ?, ?, ?)',
         [userId, fullName, email, passwordHash],
         connection,
       )
       await query(
-        "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES (?, ?, ?, 'member', 'pending')",
-        [newId(), organizationId, userId],
+        "INSERT INTO organization_members (id, organization_id, user_id, role_id, status) VALUES (?, ?, ?, ?, 'pending')",
+        [newId(), organizationId, userId, roleIds[DEFAULT_MEMBER_SLUG]],
         connection,
       )
     })
@@ -86,12 +94,7 @@ export async function login({ email, password }, meta) {
   if (account.status !== 'active') throw ApiError.forbidden(PENDING_MESSAGE)
 
   const token = await createSession({ userId: account.id, organizationId: account.org_id, ...meta })
-  return toSession(
-    token,
-    { id: account.id, fullName: account.full_name, email: account.email },
-    { id: account.org_id, name: account.org_name },
-    account.role,
-  )
+  return toSession(token, account)
 }
 
 export async function logout(sessionId) {
@@ -120,10 +123,36 @@ export async function acceptInvite({ token, password }, meta) {
 
   const account = await findAccountByEmail(rows[0].email)
   const sessionToken = await createSession({ userId: account.id, organizationId: account.org_id, ...meta })
-  return toSession(
-    sessionToken,
-    { id: account.id, fullName: account.full_name, email: account.email },
-    { id: account.org_id, name: account.org_name },
-    account.role,
+  return toSession(sessionToken, account)
+}
+
+// The caller's current session details (role and permissions may have changed since login).
+export function currentSession(auth) {
+  return {
+    user: auth.user,
+    organizationId: auth.organizationId,
+    role: auth.role,
+    roleName: auth.roleName,
+    permissions: auth.permissions,
+  }
+}
+
+// One-click logins for the login page, while SHOW_DEMO_ACCOUNTS is on (off in production by default).
+// Only accounts that exist, are active and can log in are listed.
+export async function listDemoAccounts() {
+  if (!showDemoAccounts) return []
+  const candidates = [...seededAccounts, ...demoAccounts]
+  const emails = candidates.map((a) => a.email)
+  const rows = await query(
+    `SELECT u.email, r.name AS role_name, r.slug AS role
+       FROM users u
+       JOIN organization_members m ON m.user_id = u.id AND m.status = 'active'
+       JOIN roles r ON r.id = m.role_id
+      WHERE u.password_hash IS NOT NULL AND u.email IN (${emails.map(() => '?').join(', ')})`,
+    emails,
   )
+  const byEmail = new Map(rows.map((r) => [r.email, r]))
+  return candidates
+    .filter((a) => byEmail.has(a.email))
+    .map((a) => ({ fullName: a.fullName, email: a.email, password: a.password, role: byEmail.get(a.email).role, roleName: byEmail.get(a.email).role_name }))
 }

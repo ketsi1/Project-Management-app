@@ -6,11 +6,17 @@
 // in the .env file and the app switches to httpApi automatically.
 // ---------------------------------------------------------------------------
 import type {
+  Bug,
+  BugComment,
+  BugStatus,
   CustomField,
   Member,
   Organization,
+  Permission,
+  PermissionInfo,
   Project,
   Role,
+  RoleDetail,
   Session,
   Status,
   Terminology,
@@ -19,6 +25,51 @@ import type {
 import type { ApiClient } from './ApiClient'
 import { ApiError } from './ApiError'
 import { getStoredSession } from './session'
+
+// --- Roles (fixed in the mock; the real backend lets admins edit them) -------
+
+const ALL_PERMISSIONS: PermissionInfo[] = [
+  { key: 'organization.update', group: 'Organization', name: 'Edit organization', description: 'Change the organization name and terminology.' },
+  { key: 'statuses.manage', group: 'Organization', name: 'Manage statuses', description: 'Add, rename, reorder and delete board columns.' },
+  { key: 'fields.manage', group: 'Organization', name: 'Manage custom fields', description: 'Add and delete custom fields on tasks.' },
+  { key: 'members.view', group: 'Members', name: 'View team', description: 'See the team page with everyone’s workload.' },
+  { key: 'members.create', group: 'Members', name: 'Add members', description: 'Create accounts and send invitations.' },
+  { key: 'members.approve', group: 'Members', name: 'Approve sign-ups', description: 'Approve or reject people who signed up themselves.' },
+  { key: 'members.update_role', group: 'Members', name: 'Change member roles', description: 'Give a member a different role.' },
+  { key: 'members.remove', group: 'Members', name: 'Remove members', description: 'Remove people from the organization.' },
+  { key: 'roles.manage', group: 'Members', name: 'Manage roles', description: 'Create, edit and delete roles and their permissions.' },
+  { key: 'projects.view_all', group: 'Projects', name: 'See all projects', description: 'Without this, a person only sees projects that have work assigned to them.' },
+  { key: 'projects.create', group: 'Projects', name: 'Create projects', description: 'Start new projects.' },
+  { key: 'projects.update', group: 'Projects', name: 'Edit projects', description: 'Rename projects and change their description.' },
+  { key: 'projects.delete', group: 'Projects', name: 'Delete projects', description: 'Delete projects and all their tasks.' },
+  { key: 'tasks.view_all', group: 'Tasks', name: 'See all tasks', description: 'See everyone’s tasks and the team dashboard, not just your own.' },
+  { key: 'tasks.create', group: 'Tasks', name: 'Create tasks', description: 'Add tasks to projects they can see.' },
+  { key: 'tasks.manage_all', group: 'Tasks', name: 'Edit any task', description: 'Edit and delete any task.' },
+  { key: 'bugs.report', group: 'Bugs', name: 'Report bugs', description: 'Report new bugs. Anyone who can see a bug can comment on it.' },
+  { key: 'bugs.view_all', group: 'Bugs', name: 'See all bugs', description: 'See every bug, not only ones you reported, are assigned or can see the project of.' },
+  { key: 'bugs.manage', group: 'Bugs', name: 'Triage bugs', description: 'Assign, prioritize, edit, resolve and delete any bug.' },
+]
+const EVERYTHING = ALL_PERMISSIONS.map((p) => p.key)
+
+const MOCK_ROLES: RoleDetail[] = [
+  { id: 'role-owner', slug: 'owner', name: 'Owner', description: 'Full control of the organization.', isSystem: true, locked: true, permissions: EVERYTHING, memberCount: 0 },
+  { id: 'role-admin', slug: 'admin', name: 'Admin', description: 'Runs the workspace: people, roles, settings, projects and all tasks.', isSystem: true, locked: false, permissions: EVERYTHING, memberCount: 0 },
+  {
+    id: 'role-manager',
+    slug: 'manager',
+    name: 'Project Manager',
+    description: 'Plans projects and manages everyone’s tasks, but not people or settings.',
+    isSystem: false,
+    locked: false,
+    permissions: ['members.view', 'projects.view_all', 'projects.create', 'projects.update', 'tasks.view_all', 'tasks.create', 'tasks.manage_all', 'bugs.report', 'bugs.view_all', 'bugs.manage'],
+    memberCount: 0,
+  },
+  { id: 'role-member', slug: 'member', name: 'Member', description: 'Works on the tasks assigned to them and can add their own.', isSystem: true, locked: false, permissions: ['tasks.create', 'bugs.report'], memberCount: 0 },
+]
+
+const roleBySlug = (slug: Role) => MOCK_ROLES.find((r) => r.slug === slug) ?? MOCK_ROLES[MOCK_ROLES.length - 1]
+
+const MOCK_ONLY = 'Editing roles needs the real backend. Set VITE_API_URL in .env and run it.'
 
 // --- Shape of the fake database -------------------------------------------
 
@@ -42,6 +93,9 @@ interface StoredOrganization {
   fields: CustomField[]
   projects: Project[]
   workItems: WorkItem[]
+  // Added later: missing in data saved by older versions of the demo.
+  bugs?: Bug[]
+  bugComments?: Array<BugComment & { bugId: string }>
 }
 
 interface Database {
@@ -330,22 +384,57 @@ function currentOrg(db: Database): StoredOrganization {
   return org
 }
 
-function requireAdmin(): void {
+// Same idea as the backend: the role decides the permissions.
+function sessionCan(permission: Permission): boolean {
   const session = getStoredSession()
-  if (!session || session.role === 'member') {
-    throw new ApiError('Only owners and admins can change settings.', 403)
-  }
+  return !!session && roleBySlug(session.role).permissions.includes(permission)
 }
 
-function isManagerSession(): boolean {
-  const role = getStoredSession()?.role
-  return role === 'owner' || role === 'admin'
+function requirePermission(permission: Permission): void {
+  if (!sessionCan(permission)) throw new ApiError('Your role does not allow this.', 403)
 }
+
+const seesAllProjects = () => sessionCan('projects.view_all')
+
+// --- Bugs: same rules as the backend's bugService ---------------------------------
+
+const BUG_STATUS_LABELS: Record<BugStatus, string> = { open: 'Open', in_progress: 'In progress', resolved: 'Resolved', closed: 'Closed' }
+
+function orgBugs(org: StoredOrganization) {
+  org.bugs ??= []
+  org.bugComments ??= []
+  return { bugs: org.bugs, comments: org.bugComments }
+}
+
+function canSeeBug(org: StoredOrganization, bug: Bug): boolean {
+  const userId = getStoredSession()?.user.id
+  if (sessionCan('bugs.view_all') || seesAllProjects()) return true
+  if (bug.reporterId === userId || bug.assigneeId === userId) return true
+  return visibleProjectIds(org)?.has(bug.projectId) ?? true
+}
+
+function findVisibleBug(org: StoredOrganization, id: string): Bug {
+  const bug = orgBugs(org).bugs.find((b) => b.id === id)
+  if (!bug || !canSeeBug(org, bug)) throw new ApiError('Bug not found.', 404)
+  return bug
+}
+
+function withCommentCount(org: StoredOrganization, bug: Bug): Bug {
+  return { ...bug, commentCount: orgBugs(org).comments.filter((c) => c.bugId === bug.id && c.kind === 'comment').length }
+}
+
+function logBugEvent(org: StoredOrganization, bugId: string, body: string, kind: 'event' | 'comment' = 'event'): BugComment & { bugId: string } {
+  const session = getStoredSession()
+  const entry = { id: newId(), bugId, kind, authorId: session?.user.id ?? null, authorName: session?.user.fullName ?? null, body, createdAt: now() }
+  orgBugs(org).comments.push(entry)
+  return entry
+}
+const managesAllTasks = () => sessionCan('tasks.manage_all')
 
 // Same rule as the real backend: managers see every project, employees only projects
 // where at least one task is assigned to them.
 function visibleProjectIds(org: StoredOrganization): Set<string> | null {
-  if (isManagerSession()) return null
+  if (seesAllProjects()) return null
   const userId = getStoredSession()?.user.id
   return new Set(org.workItems.filter((w) => w.assigneeId === userId).map((w) => w.projectId))
 }
@@ -356,7 +445,14 @@ function toSession(user: StoredUser, organization: Organization): Session {
     user: { id: user.id, fullName: user.fullName, email: user.email },
     organization,
     role: user.role,
+    roleName: roleBySlug(user.role).name,
+    permissions: roleBySlug(user.role).permissions,
   }
+}
+
+function toMember(u: StoredUser): Member {
+  const role = roleBySlug(u.role)
+  return { id: u.id, fullName: u.fullName, email: u.email, role: role.slug, roleId: role.id, roleName: role.name, activated: true }
 }
 
 // --- The mock API itself ---------------------------------------------------
@@ -409,27 +505,46 @@ export const mockApi: ApiClient = {
     await delay(50)
   },
 
+  async me() {
+    const session = getStoredSession()
+    const user = session && loadDb().users.find((u) => u.id === session.user.id)
+    if (!user) throw new ApiError('Please log in again.', 401)
+    const { token: _token, organization: _organization, ...info } = toSession(user, session.organization)
+    return info
+  },
+
+  async acceptInvite() {
+    throw new ApiError('Invitation links need the real backend. In the demo, invited people log in with password123.')
+  },
+
+  async demoAccounts() {
+    return [
+      { fullName: 'Alex Morgan', email: 'alex@acme.com', password: '87654321', role: 'owner', roleName: 'Owner' },
+      { fullName: 'Sarah Connor', email: 'sarah@acme.com', password: '12345678', role: 'member', roleName: 'Member' },
+      { fullName: 'David Kim', email: 'david@acme.com', password: '21345678', role: 'member', roleName: 'Member' },
+    ]
+  },
+
   async getWorkspace() {
     await delay()
     const db = loadDb()
     const org = currentOrg(db)
     const inOrg = db.users.filter((u) => u.organizationId === org.organization.id)
-    const toMember = (u: StoredUser): Member => ({ id: u.id, fullName: u.fullName, email: u.email, role: u.role })
-    const session = getStoredSession()
-    const isManager = session?.role === 'owner' || session?.role === 'admin'
+    const canApprove = sessionCan('members.approve')
     return {
       organization: org.organization,
       terminology: org.terminology,
       statuses: [...org.statuses].sort((a, b) => a.position - b.position),
       fields: org.fields,
       members: inOrg.filter((u) => u.status !== 'pending').map(toMember),
-      pendingMembers: isManager ? inOrg.filter((u) => u.status === 'pending').map(toMember) : [],
+      pendingMembers: canApprove ? inOrg.filter((u) => u.status === 'pending').map(toMember) : [],
+      roles: MOCK_ROLES.map(({ id, slug, name }) => ({ id, slug, name })),
     }
   },
 
   async updateOrganization(name, terminology) {
     await delay()
-    requireAdmin()
+    requirePermission('organization.update')
     const db = loadDb()
     const org = currentOrg(db)
     org.organization.name = name
@@ -439,7 +554,7 @@ export const mockApi: ApiClient = {
 
   async createStatus(input) {
     await delay()
-    requireAdmin()
+    requirePermission('statuses.manage')
     const db = loadDb()
     const org = currentOrg(db)
     const status: Status = { ...input, id: newId() }
@@ -450,7 +565,7 @@ export const mockApi: ApiClient = {
 
   async updateStatus(id, input) {
     await delay()
-    requireAdmin()
+    requirePermission('statuses.manage')
     const db = loadDb()
     const org = currentOrg(db)
     const index = org.statuses.findIndex((s) => s.id === id)
@@ -462,7 +577,7 @@ export const mockApi: ApiClient = {
 
   async deleteStatus(id, moveToStatusId) {
     await delay()
-    requireAdmin()
+    requirePermission('statuses.manage')
     const db = loadDb()
     const org = currentOrg(db)
     if (org.statuses.length <= 1) throw new ApiError('You need at least one status.')
@@ -478,7 +593,7 @@ export const mockApi: ApiClient = {
 
   async createField(input) {
     await delay()
-    requireAdmin()
+    requirePermission('fields.manage')
     const db = loadDb()
     const org = currentOrg(db)
     const field: CustomField = { ...input, id: newId() }
@@ -489,7 +604,7 @@ export const mockApi: ApiClient = {
 
   async deleteField(id) {
     await delay()
-    requireAdmin()
+    requirePermission('fields.manage')
     const db = loadDb()
     const org = currentOrg(db)
     org.fields = org.fields.filter((f) => f.id !== id)
@@ -498,31 +613,70 @@ export const mockApi: ApiClient = {
 
   async inviteMember(input) {
     await delay()
-    requireAdmin()
+    requirePermission('members.create')
     const db = loadDb()
     const org = currentOrg(db)
     const email = input.email.trim().toLowerCase()
     if (db.users.some((u) => u.email === email)) {
       throw new ApiError('This email already has an account.', 409)
     }
-    // In the mock, invited members can log in with password123.
-    // The real backend will email them a link to set their password.
+    const role = MOCK_ROLES.find((r) => r.id === input.roleId)
+    if (!role || role.slug === 'owner') throw new ApiError('Choose a valid role.')
+    // In the mock, invited members without a password can log in with password123.
     const user: StoredUser = {
       id: newId(),
       fullName: input.fullName.trim(),
       email,
-      passwordHash: DEFAULT_PASSWORD_HASH,
+      passwordHash: input.password ? await hashPassword(input.password) : DEFAULT_PASSWORD_HASH,
       organizationId: org.organization.id,
-      role: input.role,
+      role: role.slug,
     }
     db.users.push(user)
     saveDb(db)
-    return { id: user.id, fullName: user.fullName, email: user.email, role: user.role }
+    return toMember(user)
+  },
+
+  async updateMemberRole(id, roleId) {
+    await delay()
+    requirePermission('members.update_role')
+    const db = loadDb()
+    const org = currentOrg(db)
+    const user = db.users.find((u) => u.id === id && u.organizationId === org.organization.id)
+    const role = MOCK_ROLES.find((r) => r.id === roleId)
+    if (!user) throw new ApiError('Member not found.', 404)
+    if (!role || role.slug === 'owner') throw new ApiError('Choose a valid role.')
+    if (user.role === 'owner') throw new ApiError('The owner cannot be changed.')
+    if (user.id === getStoredSession()?.user.id) throw new ApiError('You cannot change yourself.')
+    user.role = role.slug
+    saveDb(db)
+  },
+
+  async listPermissions() {
+    requirePermission('roles.manage')
+    return ALL_PERMISSIONS
+  },
+
+  async listRoles() {
+    requirePermission('roles.manage')
+    const users = loadDb().users
+    return MOCK_ROLES.map((r) => ({ ...r, memberCount: users.filter((u) => u.role === r.slug).length }))
+  },
+
+  async createRole() {
+    throw new ApiError(MOCK_ONLY)
+  },
+
+  async updateRole() {
+    throw new ApiError(MOCK_ONLY)
+  },
+
+  async deleteRole() {
+    throw new ApiError(MOCK_ONLY)
   },
 
   async approveMember(id) {
     await delay()
-    requireAdmin()
+    requirePermission('members.approve')
     const db = loadDb()
     const org = currentOrg(db)
     const user = db.users.find((u) => u.id === id && u.organizationId === org.organization.id && u.status === 'pending')
@@ -533,7 +687,7 @@ export const mockApi: ApiClient = {
 
   async removeMember(id) {
     await delay()
-    requireAdmin()
+    requirePermission('members.remove')
     const db = loadDb()
     const org = currentOrg(db)
     const user = db.users.find((u) => u.id === id && u.organizationId === org.organization.id)
@@ -555,6 +709,7 @@ export const mockApi: ApiClient = {
 
   async createProject(input) {
     await delay()
+    requirePermission('projects.create')
     const db = loadDb()
     const org = currentOrg(db)
     const project: Project = { ...input, id: newId(), createdAt: now() }
@@ -565,6 +720,7 @@ export const mockApi: ApiClient = {
 
   async updateProject(id, input) {
     await delay()
+    requirePermission('projects.update')
     const db = loadDb()
     const org = currentOrg(db)
     const project = org.projects.find((p) => p.id === id)
@@ -577,6 +733,7 @@ export const mockApi: ApiClient = {
 
   async deleteProject(id) {
     await delay()
+    requirePermission('projects.delete')
     const db = loadDb()
     const org = currentOrg(db)
     org.projects = org.projects.filter((p) => p.id !== id)
@@ -594,6 +751,7 @@ export const mockApi: ApiClient = {
 
   async createWorkItem(input) {
     await delay()
+    requirePermission('tasks.create')
     const db = loadDb()
     const org = currentOrg(db)
     if (!input.title.trim()) throw new ApiError('Title is required.')
@@ -615,7 +773,7 @@ export const mockApi: ApiClient = {
     const current = org.workItems[index]
     const userId = getStoredSession()?.user.id
     // Employees: full edits on their own tasks; on others only the status of a task assigned to them.
-    if (!isManagerSession() && current.createdById !== userId) {
+    if (!managesAllTasks() && current.createdById !== userId) {
       const changed = (Object.keys(changes) as Array<keyof typeof changes>).filter(
         (key) => JSON.stringify(changes[key] ?? null) !== JSON.stringify(current[key] ?? null),
       )
@@ -629,13 +787,124 @@ export const mockApi: ApiClient = {
     return org.workItems[index]
   },
 
+  async listBugs(projectId) {
+    await delay()
+    const org = currentOrg(loadDb())
+    return orgBugs(org)
+      .bugs.filter((b) => canSeeBug(org, b) && (!projectId || b.projectId === projectId))
+      .map((b) => withCommentCount(org, b))
+      .sort((a, b) => b.number - a.number)
+  },
+
+  async getBug(id) {
+    await delay()
+    const org = currentOrg(loadDb())
+    const bug = findVisibleBug(org, id)
+    const comments = orgBugs(org)
+      .comments.filter((c) => c.bugId === id)
+      .map(({ bugId: _bugId, ...c }) => c)
+    return { ...withCommentCount(org, bug), comments }
+  },
+
+  async createBug(input) {
+    await delay()
+    requirePermission('bugs.report')
+    if (input.assigneeId && !sessionCan('bugs.manage')) throw new ApiError('Only people who triage bugs can assign them.', 403)
+    if (!input.title.trim()) throw new ApiError('Title is required.')
+    const db = loadDb()
+    const org = currentOrg(db)
+    if (!org.projects.some((p) => p.id === input.projectId)) throw new ApiError('Choose a valid project.')
+    const { bugs } = orgBugs(org)
+    const number = bugs.reduce((max, b) => Math.max(max, b.number), 0) + 1
+    const bug: Bug = {
+      ...input,
+      id: newId(),
+      number,
+      key: `BUG-${number}`,
+      status: 'open',
+      resolution: null,
+      reporterId: getStoredSession()?.user.id ?? null,
+      commentCount: 0,
+      resolvedAt: null,
+      closedAt: null,
+      createdAt: now(),
+      updatedAt: now(),
+    }
+    bugs.push(bug)
+    logBugEvent(org, bug.id, 'reported this bug')
+    saveDb(db)
+    return bug
+  },
+
+  async updateBug(id, changes) {
+    await delay()
+    const db = loadDb()
+    const org = currentOrg(db)
+    const bug = findVisibleBug(org, id)
+    const userId = getStoredSession()?.user.id
+    const keys = (Object.keys(changes) as Array<keyof typeof changes>).filter((k) => changes[k] !== undefined && changes[k] !== bug[k])
+    if (!sessionCan('bugs.manage')) {
+      const statusOnly = keys.every((k) => k === 'status' || k === 'resolution')
+      const triage = keys.some((k) => k === 'assigneeId' || k === 'priority')
+      if (triage) throw new ApiError('Only people who triage bugs can assign or prioritize them.', 403)
+      if (bug.reporterId !== userId && !(statusOnly && bug.assigneeId === userId)) {
+        throw new ApiError('Only the reporter, the assignee or someone who triages bugs can change this bug.', 403)
+      }
+    }
+    const before = { ...bug }
+    Object.assign(bug, changes)
+    const finished = bug.status === 'resolved' || bug.status === 'closed'
+    bug.resolution = finished ? (bug.resolution ?? 'fixed') : null
+    if (bug.status !== before.status) {
+      bug.resolvedAt = bug.status === 'resolved' || bug.status === 'closed' ? (before.resolvedAt ?? now()) : null
+      bug.closedAt = bug.status === 'closed' ? now() : null
+      const wasFinished = before.status === 'resolved' || before.status === 'closed'
+      logBugEvent(
+        org,
+        id,
+        wasFinished && !finished ? 'reopened this bug' : `changed the status from ${BUG_STATUS_LABELS[before.status]} to ${BUG_STATUS_LABELS[bug.status]}`,
+      )
+    }
+    if (bug.assigneeId !== before.assigneeId) {
+      const name = db.users.find((u) => u.id === bug.assigneeId)?.fullName
+      logBugEvent(org, id, name ? `assigned this bug to ${name}` : 'unassigned this bug')
+    }
+    bug.updatedAt = now()
+    saveDb(db)
+    return withCommentCount(org, bug)
+  },
+
+  async deleteBug(id) {
+    await delay()
+    const db = loadDb()
+    const org = currentOrg(db)
+    const bug = findVisibleBug(org, id)
+    const reporterMayDelete = bug.reporterId === getStoredSession()?.user.id && bug.status === 'open'
+    if (!sessionCan('bugs.manage') && !reporterMayDelete) throw new ApiError('Only people who triage bugs can delete it.', 403)
+    const store = orgBugs(org)
+    org.bugs = store.bugs.filter((b) => b.id !== id)
+    org.bugComments = store.comments.filter((c) => c.bugId !== id)
+    saveDb(db)
+  },
+
+  async addBugComment(id, body) {
+    await delay()
+    if (!body.trim()) throw new ApiError('Comment is required.')
+    const db = loadDb()
+    const org = currentOrg(db)
+    findVisibleBug(org, id)
+    const { bugId: _bugId, ...comment } = logBugEvent(org, id, body.trim(), 'comment')
+    saveDb(db)
+    return comment
+  },
+
   async deleteWorkItem(id) {
     await delay()
     const db = loadDb()
     const org = currentOrg(db)
     const item = org.workItems.find((w) => w.id === id)
     if (!item) throw new ApiError('Item not found.', 404)
-    if (!isManagerSession() && item.createdById !== getStoredSession()?.user.id) {
+    if (!managesAllTasks() && item.createdById !== getStoredSession()?.user.id) {
       throw new ApiError('Only a manager can delete this task. You can change its status instead.', 403)
     }
     org.workItems = org.workItems.filter((w) => w.id !== id)

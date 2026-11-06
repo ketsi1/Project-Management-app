@@ -5,4 +5,6 @@ export const Events = Object.freeze({
   WORK_ITEMS_CHANGED: 'workItems:changed',
   PROJECTS_CHANGED: 'projects:changed',
   WORKSPACE_CHANGED: 'workspace:changed',
+  // A bug was reported, changed, commented on or deleted. The frontend reloads its bug list.
+  BUGS_CHANGED: 'bugs:changed',
 })

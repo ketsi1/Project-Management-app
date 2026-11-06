@@ -4,7 +4,7 @@ import { Events } from '../realtime/events.js'
 import { broadcastToOrg } from '../realtime/socket.js'
 import { ApiError } from '../utils/ApiError.js'
 import { newId } from '../utils/time.js'
-import { isManager, visibleProjectsFilter } from './visibility.js'
+import { seesAllProjects, visibleProjectsFilter } from './visibility.js'
 
 async function findProject(organizationId, id) {
   const rows = await query('SELECT * FROM projects WHERE id = ? AND organization_id = ?', [id, organizationId])
@@ -12,9 +12,9 @@ async function findProject(organizationId, id) {
   return toProject(rows[0])
 }
 
-// Managers see every project; employees only those with a work item assigned to them.
+// Roles with 'projects.view_all' see every project; everyone else only those with a work item assigned to them.
 export async function listProjects(auth) {
-  const filter = isManager(auth) ? null : visibleProjectsFilter(auth, 'p.id')
+  const filter = seesAllProjects(auth) ? null : visibleProjectsFilter(auth, 'p.id')
   const rows = await query(
     `SELECT p.* FROM projects p
       WHERE p.organization_id = ?${filter ? ` AND ${filter.sql}` : ''}
