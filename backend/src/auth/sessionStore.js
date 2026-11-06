@@ -1,23 +1,27 @@
-// Database access for login sessions (one row per issued token).
+// Login sessions (one row per issued token).
 import { env } from '../config/env.js'
-import { query } from '../db/pool.js'
+import { prisma } from '../db/prisma.js'
 import { newId } from '../utils/time.js'
 import { signAccessToken, verifyAccessToken } from './tokens.js'
 
-export async function createSession({ userId, organizationId, userAgent, ip }, connection) {
+// `db` can be a transaction client, so a session can be created together with other changes.
+export async function createSession({ userId, organizationId, userAgent, ip }, db = prisma) {
   const sessionId = newId()
-  const expiresAt = new Date(Date.now() + env.auth.tokenTtlSeconds * 1000)
-  await query(
-    `INSERT INTO auth_sessions (id, user_id, organization_id, user_agent, ip_address, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [sessionId, userId, organizationId, userAgent?.slice(0, 255) ?? null, ip?.slice(0, 45) ?? null, expiresAt],
-    connection,
-  )
+  await db.authSession.create({
+    data: {
+      id: sessionId,
+      userId,
+      organizationId,
+      userAgent: userAgent?.slice(0, 255) ?? null,
+      ipAddress: ip?.slice(0, 45) ?? null,
+      expiresAt: new Date(Date.now() + env.auth.tokenTtlSeconds * 1000),
+    },
+  })
   return signAccessToken({ userId, organizationId, sessionId })
 }
 
 export async function revokeSession(sessionId) {
-  await query('UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE id = ? AND revoked_at IS NULL', [sessionId])
+  await prisma.authSession.updateMany({ where: { id: sessionId, revokedAt: null }, data: { revokedAt: new Date() } })
 }
 
 // Checks the token's signature, then that its session is still active and the user is still
@@ -27,32 +31,49 @@ export async function resolveToken(token) {
   const claims = verifyAccessToken(token)
   if (!claims) return null
 
-  const rows = await query(
-    `SELECT u.id AS userId, u.full_name AS fullName, u.email, m.organization_id AS organizationId,
-            r.id AS roleId, r.slug AS role, r.name AS roleName,
-            (SELECT GROUP_CONCAT(p.\`key\` ORDER BY p.\`key\`)
-               FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id
-              WHERE rp.role_id = r.id) AS permissions
-       FROM auth_sessions s
-       JOIN users u ON u.id = s.user_id
-       JOIN organization_members m ON m.user_id = s.user_id AND m.organization_id = s.organization_id
-       JOIN roles r ON r.id = m.role_id
-      WHERE s.id = ? AND s.user_id = ? AND s.organization_id = ?
-        AND m.status = 'active'
-        AND s.revoked_at IS NULL AND s.expires_at > CURRENT_TIMESTAMP`,
-    [claims.sessionId, claims.userId, claims.organizationId],
-  )
-  if (rows.length === 0) return null
+  const session = await prisma.authSession.findFirst({
+    where: {
+      id: claims.sessionId,
+      userId: claims.userId,
+      organizationId: claims.organizationId,
+      revokedAt: null,
+      expiresAt: { gt: new Date() },
+    },
+    select: {
+      user: {
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          memberships: {
+            where: { organizationId: claims.organizationId, status: 'active' },
+            select: {
+              role: {
+                select: {
+                  id: true,
+                  slug: true,
+                  name: true,
+                  permissions: { select: { permission: { select: { key: true } } } },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  })
+  const membership = session?.user.memberships[0]
+  if (!membership) return null
 
-  const row = rows[0]
+  const { user } = session
   return {
     sessionId: claims.sessionId,
-    userId: row.userId,
-    organizationId: row.organizationId,
-    role: row.role,
-    roleId: row.roleId,
-    roleName: row.roleName,
-    permissions: row.permissions ? row.permissions.split(',') : [],
-    user: { id: row.userId, fullName: row.fullName, email: row.email },
+    userId: user.id,
+    organizationId: claims.organizationId,
+    role: membership.role.slug,
+    roleId: membership.role.id,
+    roleName: membership.role.name,
+    permissions: membership.role.permissions.map((p) => p.permission.key).sort(),
+    user: { id: user.id, fullName: user.fullName, email: user.email },
   }
 }

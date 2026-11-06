@@ -1,7 +1,7 @@
 import { createServer } from 'node:http'
 import { createApp } from './app.js'
 import { env } from './config/env.js'
-import { checkDatabase, pool } from './db/pool.js'
+import { checkDatabase, closeDatabase } from './db/prisma.js'
 import { closeRealtime, initRealtime } from './realtime/socket.js'
 
 async function main() {
@@ -32,7 +32,7 @@ async function main() {
     forceExit.unref()
     await closeRealtime()
     await new Promise((resolve) => httpServer.close(resolve))
-    await pool.end()
+    await closeDatabase()
     process.exit(0)
   }
   process.on('SIGINT', () => shutdown('SIGINT'))

@@ -1,4 +1,5 @@
 import { Link } from 'react-router'
+import PendingApprovals from '../components/settings/PendingApprovals'
 import Avatar from '../components/ui/Avatar'
 import { Alert, EmptyState, LoadingState, PriorityBadge, ProgressBar } from '../components/ui/Display'
 import Icon from '../components/ui/Icon'
@@ -10,9 +11,10 @@ import { categoryOf, cn, completion, formatDate, isOverdue } from '../utils/form
 
 const priorityRank: Record<Priority, number> = { urgent: 4, high: 3, medium: 2, low: 1 }
 
-// Manager-only: who is working on what, and who is overloaded or falling behind.
+// Who is working on what, and who is overloaded or falling behind ('members.view'), plus
+// sign-ups waiting for approval at the top ('members.approve').
 export default function TeamPage() {
-  const { session } = useAuth()
+  const { session, can } = useAuth()
   const { workspace, projects } = useWorkspace()
   const { statuses, members, terminology } = workspace
   const { allItems, loading, error } = useWorkItems()
@@ -44,9 +46,11 @@ export default function TeamPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Team</h1>
-          <p className="mt-1 text-sm text-slate-500">Workload, progress and overdue work for each person.</p>
+          <p className="mt-1 text-sm text-slate-500">
+            {can('members.view') ? 'Workload, progress and overdue work for each person.' : 'People waiting to join the organization.'}
+          </p>
         </div>
-        {unassignedOpen > 0 && (
+        {can('members.view') && unassignedOpen > 0 && (
           <Link
             to="/app/tasks?assignee=none"
             className="inline-flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800 ring-1 ring-amber-200 ring-inset hover:bg-amber-100"
@@ -59,7 +63,19 @@ export default function TeamPage() {
 
       {error && <Alert>{error}</Alert>}
 
-      {rows.length === 0 ? (
+      {/* Sign-ups waiting for approval. Renders nothing when nobody is waiting. */}
+      {can('members.approve') && (
+        <div className="surface p-4 sm:p-5 empty:hidden">
+          <PendingApprovals />
+        </div>
+      )}
+      {can('members.approve') && !can('members.view') && workspace.pendingMembers.length === 0 && (
+        <div className="surface">
+          <EmptyState icon="checkCircle" title="No one is waiting" description="New sign-ups will appear here for you to approve." />
+        </div>
+      )}
+
+      {!can('members.view') ? null : rows.length === 0 ? (
         <div className="surface">
           <EmptyState icon="users" title="No team members yet" description="Invite people in Settings → Members." />
         </div>

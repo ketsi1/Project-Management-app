@@ -1,12 +1,8 @@
-import { Navigate, Route, Routes } from 'react-router'
+import { Navigate, Route, Routes, useLocation, useParams } from 'react-router'
 import { ProtectedRoute, PublicOnlyRoute, RequirePermission } from './components/layout/RouteGuards'
 import AcceptInvitePage from './pages/AcceptInvitePage'
 import { SETTINGS_PERMISSIONS } from './utils/permissions'
-import ApprovalsPage from './pages/ApprovalsPage'
-import BugDetailPage from './pages/BugDetailPage'
-import BugsPage from './pages/BugsPage'
 import DashboardPage from './pages/DashboardPage'
-import DeadlinesPage from './pages/DeadlinesPage'
 import TasksPage from './pages/TasksPage'
 import TeamPage from './pages/TeamPage'
 import LoginPage from './pages/LoginPage'
@@ -29,17 +25,16 @@ export default function App() {
         <Route path="projects/:projectId" element={<ProjectPage />} />
         {/* Shared tabs: each role only sees its own scope (managers: everyone, employees: themselves). */}
         <Route path="tasks" element={<TasksPage />} />
-        <Route path="deadlines" element={<DeadlinesPage />} />
-        {/* Everyone can open bugs; each person sees the bugs their role allows. */}
-        <Route path="bugs" element={<BugsPage />} />
-        <Route path="bugs/:bugId" element={<BugDetailPage />} />
+        {/* Deadlines and bugs are filters on the Tasks page now; old links still work. */}
+        <Route path="deadlines" element={<Navigate to="/app/tasks?view=deadlines" replace />} />
+        <Route path="bugs" element={<OldBugsLink />} />
+        <Route path="bugs/:bugId" element={<OldBugsLink />} />
         {/* Each page needs a permission from the person's role (see Settings → Roles). */}
-        <Route element={<RequirePermission anyOf={['members.view']} />}>
+        {/* Team shows workload ('members.view') and sign-ups waiting for approval ('members.approve'). */}
+        <Route element={<RequirePermission anyOf={['members.view', 'members.approve']} />}>
           <Route path="team" element={<TeamPage />} />
         </Route>
-        <Route element={<RequirePermission anyOf={['members.approve']} />}>
-          <Route path="approvals" element={<ApprovalsPage />} />
-        </Route>
+        <Route path="approvals" element={<Navigate to="/app/team" replace />} />
         <Route element={<RequirePermission anyOf={SETTINGS_PERMISSIONS} />}>
           <Route path="settings" element={<SettingsPage />} />
         </Route>
@@ -48,4 +43,14 @@ export default function App() {
       <Route path="*" element={<Navigate to="/app" replace />} />
     </Routes>
   )
+}
+
+// /app/bugs?project=… and /app/bugs/<id> → the Tasks page's Bugs filter (with the bug's drawer open).
+function OldBugsLink() {
+  const { bugId } = useParams()
+  const { search } = useLocation()
+  const next = new URLSearchParams(search)
+  next.set('view', 'bugs')
+  if (bugId) next.set('bug', bugId)
+  return <Navigate to={`/app/tasks?${next.toString()}`} replace />
 }

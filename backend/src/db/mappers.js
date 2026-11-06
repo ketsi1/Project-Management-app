@@ -1,105 +1,98 @@
-// Turn database rows (snake_case) into the JSON shapes in pm-frontend/src/types.ts.
-import { toIso } from '../utils/time.js'
+// Turn Prisma records into the JSON shapes in frontend/src/types.ts.
+import { toDateOnly, toIso } from '../utils/time.js'
 
-function parseJson(value, fallback) {
-  if (value === null || value === undefined) return fallback
-  if (typeof value === 'string') {
-    try {
-      return JSON.parse(value)
-    } catch {
-      return fallback
-    }
-  }
-  return value
+const asObject = (value) => (value && typeof value === 'object' && !Array.isArray(value) ? value : {})
+const asArray = (value) => (Array.isArray(value) ? value : [])
+
+export const toOrganization = (org) => ({ id: org.id, name: org.name })
+
+export const toTerminology = (org) => ({
+  project: org.termProject,
+  projects: org.termProjects,
+  task: org.termTask,
+  tasks: org.termTasks,
+})
+
+export const toStatus = (s) => ({ id: s.id, name: s.name, category: s.category, color: s.color, position: s.position })
+
+export const toField = (f) => ({ id: f.id, label: f.label, type: f.type, options: asArray(f.options) })
+
+// A membership loaded with `include: memberInclude`.
+export const memberInclude = {
+  user: { select: { id: true, fullName: true, email: true, passwordHash: true } },
+  role: { select: { id: true, slug: true, name: true } },
 }
 
-export const toOrganization = (row) => ({ id: row.id, name: row.name })
-
-export const toTerminology = (row) => ({
-  project: row.term_project,
-  projects: row.term_projects,
-  task: row.term_task,
-  tasks: row.term_tasks,
-})
-
-export const toStatus = (row) => ({
-  id: row.id,
-  name: row.name,
-  category: row.category,
-  color: row.color,
-  position: row.position,
-})
-
-export const toField = (row) => ({
-  id: row.id,
-  label: row.label,
-  type: row.type,
-  options: parseJson(row.options, []),
-})
-
-export const toMember = (row) => ({
-  id: row.id,
-  fullName: row.full_name,
-  email: row.email,
-  role: row.role,
-  roleId: row.role_id,
-  roleName: row.role_name,
+export const toMember = (m) => ({
+  id: m.user.id,
+  fullName: m.user.fullName,
+  email: m.user.email,
+  role: m.role.slug,
+  roleId: m.role.id,
+  roleName: m.role.name,
   // false while an invited person has not chosen a password yet
-  activated: row.activated === undefined ? true : !!row.activated,
+  activated: m.user.passwordHash !== null,
 })
 
-export const toProject = (row) => ({
-  id: row.id,
-  name: row.name,
-  description: row.description ?? '',
-  createdAt: toIso(row.created_at),
+export const toProject = (p) => ({
+  id: p.id,
+  name: p.name,
+  description: p.description ?? '',
+  createdAt: toIso(p.createdAt),
 })
 
-export const toWorkItem = (row) => ({
-  id: row.id,
-  projectId: row.project_id,
-  title: row.title,
-  description: row.description ?? '',
-  statusId: row.status_id,
-  priority: row.priority,
-  assigneeId: row.assignee_id,
-  dueDate: row.due_date,
-  customValues: parseJson(row.custom_values, {}),
-  createdById: row.created_by ?? null,
-  createdAt: toIso(row.created_at),
-  updatedAt: toIso(row.updated_at),
+export const toWorkItem = (w) => ({
+  id: w.id,
+  projectId: w.projectId,
+  title: w.title,
+  description: w.description ?? '',
+  statusId: w.statusId,
+  priority: w.priority,
+  assigneeId: w.assigneeId,
+  dueDate: toDateOnly(w.dueDate),
+  customValues: asObject(w.customValues),
+  createdById: w.createdById ?? null,
+  createdAt: toIso(w.createdAt),
+  updatedAt: toIso(w.updatedAt),
 })
 
-export const toBug = (row) => ({
-  id: row.id,
-  number: row.number,
-  key: `BUG-${row.number}`,
-  projectId: row.project_id,
-  workItemId: row.work_item_id ?? null,
-  title: row.title,
-  description: row.description ?? '',
-  stepsToReproduce: row.steps_to_reproduce ?? '',
-  expectedResult: row.expected_result ?? '',
-  actualResult: row.actual_result ?? '',
-  environment: row.environment ?? '',
-  severity: row.severity,
-  priority: row.priority,
-  status: row.status,
-  resolution: row.resolution ?? null,
-  reporterId: row.reporter_id ?? null,
-  assigneeId: row.assignee_id ?? null,
-  commentCount: Number(row.comment_count ?? 0),
-  resolvedAt: toIso(row.resolved_at),
-  closedAt: toIso(row.closed_at),
-  createdAt: toIso(row.created_at),
-  updatedAt: toIso(row.updated_at),
+// Bugs are loaded with `include: bugInclude` so the list can show how many comments each has
+// (activity entries are not counted).
+export const bugInclude = {
+  _count: { select: { comments: { where: { kind: 'comment' } } } },
+}
+
+export const toBug = (b) => ({
+  id: b.id,
+  number: b.number,
+  key: `BUG-${b.number}`,
+  projectId: b.projectId,
+  workItemId: b.workItemId ?? null,
+  title: b.title,
+  description: b.description ?? '',
+  stepsToReproduce: b.stepsToReproduce ?? '',
+  expectedResult: b.expectedResult ?? '',
+  actualResult: b.actualResult ?? '',
+  environment: b.environment ?? '',
+  severity: b.severity,
+  priority: b.priority,
+  status: b.status,
+  resolution: b.resolution ?? null,
+  reporterId: b.reporterId ?? null,
+  assigneeId: b.assigneeId ?? null,
+  commentCount: b._count?.comments ?? 0,
+  resolvedAt: toIso(b.resolvedAt),
+  closedAt: toIso(b.closedAt),
+  createdAt: toIso(b.createdAt),
+  updatedAt: toIso(b.updatedAt),
 })
 
-export const toBugComment = (row) => ({
-  id: row.id,
-  kind: row.kind,
-  authorId: row.author_id ?? null,
-  authorName: row.author_name ?? null,
-  body: row.body,
-  createdAt: toIso(row.created_at),
+// Comments are loaded with `include: { author: { select: { fullName: true } } }`.
+export const toBugComment = (c) => ({
+  id: c.id,
+  kind: c.kind,
+  authorId: c.authorId ?? null,
+  authorName: c.author?.fullName ?? null,
+  body: c.body,
+  createdAt: toIso(c.createdAt),
 })

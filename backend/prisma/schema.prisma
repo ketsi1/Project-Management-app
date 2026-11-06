@@ -1,0 +1,384 @@
+// The database, described for Prisma. This file is the single source of truth for tables.
+//
+// Change the database:  edit this file, then `npm run db:migrate -- --name what_changed`
+//                       (creates a migration in prisma/migrations and applies it).
+// Apply migrations:     `npm run db:deploy` (production / other machines; never drops data).
+//
+// Models use clear names in code (User, Bug, createdAt) and @map/@@map to the existing
+// snake_case tables and columns, so nothing in MySQL had to be renamed.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+// --- Organizations & people -------------------------------------------------------
+
+// Root of multi-tenancy, with the organization's own words for "project" and "task".
+model Organization {
+  id           String   @id @default(dbgenerated("(uuid())")) @db.Char(36)
+  name         String   @db.VarChar(255)
+  termProject  String   @default("Project") @map("term_project") @db.VarChar(50)
+  termProjects String   @default("Projects") @map("term_projects") @db.VarChar(50)
+  termTask     String   @default("Task") @map("term_task") @db.VarChar(50)
+  termTasks    String   @default("Tasks") @map("term_tasks") @db.VarChar(50)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  members      OrganizationMember[]
+  roles        Role[]
+  statuses     Status[]
+  customFields CustomField[]
+  projects     Project[]
+  workItems    WorkItem[]
+  bugs         Bug[]
+  bugComments  BugComment[]
+  sessions     AuthSession[]
+
+  @@map("organizations")
+}
+
+// An account. passwordHash is null for invited people who have not chosen a password yet.
+model User {
+  id                  String    @id @default(dbgenerated("(uuid())")) @db.Char(36)
+  fullName            String    @map("full_name") @db.VarChar(150)
+  email               String    @unique(map: "uq_users_email") @db.VarChar(255)
+  passwordHash        String?   @map("password_hash") @db.VarChar(255)
+  invitationToken     String?   @map("invitation_token") @db.VarChar(128)
+  invitationExpiresAt DateTime? @map("invitation_expires_at") @db.Timestamp(0)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  memberships       OrganizationMember[]
+  sessions          AuthSession[]
+  assignedWorkItems WorkItem[]           @relation("WorkItemAssignee")
+  createdWorkItems  WorkItem[]           @relation("WorkItemCreator")
+  reportedBugs      Bug[]                @relation("BugReporter")
+  assignedBugs      Bug[]                @relation("BugAssignee")
+  bugComments       BugComment[]
+
+  @@index([invitationToken], map: "idx_users_invitation")
+  @@map("users")
+}
+
+// A user's membership in an organization, with their role.
+// pending = signed up and waiting for approval (cannot log in); active = can log in.
+model OrganizationMember {
+  id             String       @id @default(dbgenerated("(uuid())")) @db.Char(36)
+  organizationId String       @map("organization_id") @db.Char(36)
+  userId         String       @map("user_id") @db.Char(36)
+  roleId         String       @map("role_id") @db.Char(36)
+  status         MemberStatus @default(active)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, map: "fk_org_members_organization")
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade, map: "fk_org_members_user")
+  role         Role         @relation(fields: [roleId], references: [id], map: "fk_org_members_role")
+
+  @@unique([organizationId, userId], map: "uq_org_user")
+  @@index([organizationId], map: "idx_org_members_org")
+  @@index([roleId], map: "idx_org_members_role")
+  @@index([organizationId, status], map: "idx_org_members_status")
+  @@index([userId], map: "idx_org_members_user")
+  @@map("organization_members")
+}
+
+enum MemberStatus {
+  pending
+  active
+
+  @@map("organization_members_status")
+}
+
+// One row per issued login token (the JWT's id). A token works only while its row is active.
+model AuthSession {
+  id             String    @id @db.Char(36)
+  userId         String    @map("user_id") @db.Char(36)
+  organizationId String    @map("organization_id") @db.Char(36)
+  userAgent      String?   @map("user_agent") @db.VarChar(255)
+  ipAddress      String?   @map("ip_address") @db.VarChar(45)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamp(0)
+  expiresAt      DateTime  @map("expires_at") @db.Timestamp(0)
+  revokedAt      DateTime? @map("revoked_at") @db.Timestamp(0)
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade, map: "fk_auth_sessions_user")
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, map: "fk_auth_sessions_organization")
+
+  @@index([organizationId], map: "fk_auth_sessions_organization")
+  @@index([expiresAt], map: "idx_auth_sessions_expires")
+  @@index([userId], map: "idx_auth_sessions_user")
+  @@map("auth_sessions")
+}
+
+// --- Roles & permissions (User <-> Role <-> Permission) ---------------------------
+
+// The catalog of things a role can be allowed to do. Filled from src/auth/permissions.js.
+model Permission {
+  id          String   @id @default(dbgenerated("(uuid())")) @db.Char(36)
+  key         String   @unique(map: "uq_permissions_key") @db.VarChar(100)
+  name        String   @db.VarChar(150)
+  description String   @default("") @db.VarChar(500)
+  groupName   String   @default("General") @map("group_name") @db.VarChar(50)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp(0)
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+// Roles belong to an organization. System roles (owner/admin/member) cannot be deleted.
+model Role {
+  id             String   @id @default(dbgenerated("(uuid())")) @db.Char(36)
+  organizationId String   @map("organization_id") @db.Char(36)
+  slug           String   @db.VarChar(50)
+  name           String   @db.VarChar(100)
+  description    String   @default("") @db.VarChar(500)
+  isSystem       Boolean  @default(false) @map("is_system")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade, map: "fk_roles_organization")
+  members      OrganizationMember[]
+  permissions  RolePermission[]
+
+  @@unique([organizationId, slug], map: "uq_roles_org_slug")
+  @@map("roles")
+}
+
+model RolePermission {
+  roleId       String @map("role_id") @db.Char(36)
+  permissionId String @map("permission_id") @db.Char(36)
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade, map: "fk_role_permissions_role")
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade, map: "fk_role_permissions_permission")
+
+  @@id([roleId, permissionId])
+  @@index([permissionId], map: "idx_role_permissions_permission")
+  @@map("role_permissions")
+}
+
+// --- Workspace configuration --------------------------------------------------------
+
+// Board columns, ordered by position. Every status maps to one of four categories.
+model Status {
+  id             String         @id @default(dbgenerated("(uuid())")) @db.Char(36)
+  organizationId String         @map("organization_id") @db.Char(36)
+  name           String         @db.VarChar(100)
+  category       StatusCategory
+  color          String         @default("#6366f1") @db.VarChar(16)
+  position       Int            @default(0) @db.UnsignedInt
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt      DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, map: "fk_statuses_organization")
+  workItems    WorkItem[]
+
+  @@index([organizationId, position], map: "idx_statuses_org_position")
+  @@map("statuses")
+}
+
+enum StatusCategory {
+  not_started
+  active
+  done
+  cancelled
+
+  @@map("statuses_category")
+}
+
+// Extra fields every task can carry. `options` is a JSON list for dropdown fields.
+model CustomField {
+  id             String          @id @default(dbgenerated("(uuid())")) @db.Char(36)
+  organizationId String          @map("organization_id") @db.Char(36)
+  label          String          @db.VarChar(100)
+  type           CustomFieldType
+  options        Json?
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt      DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, map: "fk_custom_fields_organization")
+
+  @@index([organizationId], map: "idx_custom_fields_org")
+  @@map("custom_fields")
+}
+
+enum CustomFieldType {
+  text
+  number
+  date
+  select
+
+  @@map("custom_fields_type")
+}
+
+// --- Projects & tasks ----------------------------------------------------------------
+
+model Project {
+  id             String   @id @default(dbgenerated("(uuid())")) @db.Char(36)
+  organizationId String   @map("organization_id") @db.Char(36)
+  name           String   @db.VarChar(255)
+  description    String?  @db.Text
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, map: "fk_projects_organization")
+  workItems    WorkItem[]
+  bugs         Bug[]
+
+  @@index([organizationId, createdAt], map: "idx_projects_org")
+  @@map("projects")
+}
+
+// A task. Deleting a status is blocked while tasks use it; removing a user unassigns their tasks.
+// customValues holds { "<custom field id>": "value" }.
+model WorkItem {
+  id             String    @id @default(dbgenerated("(uuid())")) @db.Char(36)
+  organizationId String    @map("organization_id") @db.Char(36)
+  projectId      String    @map("project_id") @db.Char(36)
+  title          String    @db.VarChar(255)
+  description    String?   @db.Text
+  statusId       String    @map("status_id") @db.Char(36)
+  priority       Priority  @default(medium)
+  assigneeId     String?   @map("assignee_id") @db.Char(36)
+  dueDate        DateTime? @map("due_date") @db.Date
+  customValues   Json?     @map("custom_values")
+  createdById    String?   @map("created_by") @db.Char(36)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, map: "fk_work_items_organization")
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade, map: "fk_work_items_project")
+  status       Status       @relation(fields: [statusId], references: [id], map: "fk_work_items_status")
+  assignee     User?        @relation("WorkItemAssignee", fields: [assigneeId], references: [id], map: "fk_work_items_assignee")
+  createdBy    User?        @relation("WorkItemCreator", fields: [createdById], references: [id], map: "fk_work_items_created_by")
+  bugs         Bug[]
+
+  @@index([assigneeId], map: "idx_work_items_assignee")
+  @@index([createdById], map: "idx_work_items_created_by")
+  @@index([organizationId, dueDate], map: "idx_work_items_org_due")
+  @@index([projectId], map: "idx_work_items_project")
+  @@index([statusId], map: "idx_work_items_status")
+  @@map("work_items")
+}
+
+enum Priority {
+  low
+  medium
+  high
+  urgent
+
+  @@map("work_items_priority")
+}
+
+// --- Bug tracking --------------------------------------------------------------------
+
+// A bug in a project, numbered per organization (BUG-12).
+// open -> in_progress -> resolved -> closed; resolution is set once resolved or closed.
+model Bug {
+  id               String         @id @default(dbgenerated("(uuid())")) @db.Char(36)
+  organizationId   String         @map("organization_id") @db.Char(36)
+  projectId        String         @map("project_id") @db.Char(36)
+  workItemId       String?        @map("work_item_id") @db.Char(36)
+  number           Int            @db.UnsignedInt
+  title            String         @db.VarChar(255)
+  description      String?        @db.Text
+  stepsToReproduce String?        @map("steps_to_reproduce") @db.Text
+  expectedResult   String?        @map("expected_result") @db.Text
+  actualResult     String?        @map("actual_result") @db.Text
+  environment      String         @default("") @db.VarChar(255)
+  severity         BugSeverity    @default(major)
+  priority         BugPriority    @default(medium)
+  status           BugStatus      @default(open)
+  resolution       BugResolution?
+  reporterId       String?        @map("reporter_id") @db.Char(36)
+  assigneeId       String?        @map("assignee_id") @db.Char(36)
+  resolvedAt       DateTime?      @map("resolved_at") @db.Timestamp(0)
+  closedAt         DateTime?      @map("closed_at") @db.Timestamp(0)
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt        DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, map: "fk_bugs_organization")
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade, map: "fk_bugs_project")
+  workItem     WorkItem?    @relation(fields: [workItemId], references: [id], map: "fk_bugs_work_item")
+  reporter     User?        @relation("BugReporter", fields: [reporterId], references: [id], map: "fk_bugs_reporter")
+  assignee     User?        @relation("BugAssignee", fields: [assigneeId], references: [id], map: "fk_bugs_assignee")
+  comments     BugComment[]
+
+  @@unique([organizationId, number], map: "uq_bugs_org_number")
+  @@index([assigneeId], map: "idx_bugs_assignee")
+  @@index([organizationId, status], map: "idx_bugs_org_status")
+  @@index([projectId], map: "idx_bugs_project")
+  @@index([reporterId], map: "idx_bugs_reporter")
+  @@index([workItemId], map: "idx_bugs_work_item")
+  @@map("bugs")
+}
+
+enum BugSeverity {
+  critical
+  major
+  minor
+  trivial
+
+  @@map("bugs_severity")
+}
+
+enum BugPriority {
+  low
+  medium
+  high
+  urgent
+
+  @@map("bugs_priority")
+}
+
+enum BugStatus {
+  open
+  in_progress
+  resolved
+  closed
+
+  @@map("bugs_status")
+}
+
+enum BugResolution {
+  fixed
+  wont_fix
+  duplicate
+  cannot_reproduce
+  by_design
+
+  @@map("bugs_resolution")
+}
+
+// A comment on a bug, or an automatic activity entry (kind = event). `seq` keeps them in order.
+model BugComment {
+  id             String         @id @default(dbgenerated("(uuid())")) @db.Char(36)
+  seq            BigInt         @unique(map: "uq_bug_comments_seq") @default(autoincrement()) @db.UnsignedBigInt
+  organizationId String         @map("organization_id") @db.Char(36)
+  bugId          String         @map("bug_id") @db.Char(36)
+  authorId       String?        @map("author_id") @db.Char(36)
+  kind           BugCommentKind @default(comment)
+  body           String         @db.Text
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamp(0)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, map: "fk_bug_comments_organization")
+  bug          Bug          @relation(fields: [bugId], references: [id], onDelete: Cascade, map: "fk_bug_comments_bug")
+  author       User?        @relation(fields: [authorId], references: [id], map: "fk_bug_comments_author")
+
+  @@index([authorId], map: "fk_bug_comments_author")
+  @@index([organizationId], map: "fk_bug_comments_organization")
+  @@index([bugId, seq], map: "idx_bug_comments_bug")
+  @@map("bug_comments")
+}
+
+enum BugCommentKind {
+  comment
+  event
+
+  @@map("bug_comments_kind")
+}

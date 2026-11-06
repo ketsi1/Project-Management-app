@@ -1,14 +1,13 @@
 import { useState } from 'react'
-import WorkItemModal from '../components/board/WorkItemModal'
-import Avatar from '../components/ui/Avatar'
-import { Alert, EmptyState, LoadingState, PriorityBadge, StatCard, StatusPill } from '../components/ui/Display'
-import Icon, { type IconName } from '../components/ui/Icon'
-import { useAuth } from '../context/authContext'
-import { useWorkspace } from '../context/workspaceContext'
-import { useWorkItems } from '../hooks/useWorkItems'
-import type { WorkItem } from '../types'
-import { pressable } from '../utils/a11y'
-import { categoryOf, cn, formatDate, todayIso } from '../utils/format'
+import { useAuth } from '../../context/authContext'
+import { useWorkspace } from '../../context/workspaceContext'
+import type { WorkItem } from '../../types'
+import { pressable } from '../../utils/a11y'
+import { categoryOf, cn, formatDate, todayIso } from '../../utils/format'
+import WorkItemModal from '../board/WorkItemModal'
+import Avatar from '../ui/Avatar'
+import { EmptyState, PriorityBadge, StatCard, StatusPill } from '../ui/Display'
+import Icon, { type IconName } from '../ui/Icon'
 
 type BucketId = 'overdue' | 'today' | 'week' | 'later' | 'none'
 
@@ -34,16 +33,13 @@ function bucketOf(item: WorkItem, today: string, weekEnd: string): BucketId {
   return 'later'
 }
 
-// Open (not done, not cancelled) tasks sorted by when they are due.
-// Managers see everyone's deadlines; employees see only their own.
-export default function DeadlinesPage() {
+// Open (not done, not cancelled) tasks sorted by when they are due. Shown on the Tasks page's
+// Deadlines filter. `items` is already scoped: everyone's for managers, your own otherwise.
+export default function DeadlinesPanel({ items, onChanged }: { items: WorkItem[]; onChanged: () => void }) {
   const { isManager } = useAuth()
   const { workspace, projects } = useWorkspace()
   const { statuses, members, terminology } = workspace
-  const { items, loading, error, reload } = useWorkItems()
   const [editing, setEditing] = useState<WorkItem | null>(null)
-
-  if (loading) return <LoadingState label="Loading deadlines…" />
 
   const today = todayIso()
   const weekEnd = addDays(today, 7)
@@ -58,15 +54,10 @@ export default function DeadlinesPage() {
   for (const item of open) grouped[bucketOf(item, today, weekEnd)].push(item)
 
   return (
-    <div className="space-y-6 pb-10">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Deadlines</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          {isManager ? 'Open work across the whole team, by due date.' : 'Your open work, by due date.'}
-        </p>
-      </div>
-
-      {error && <Alert>{error}</Alert>}
+    <div className="space-y-6">
+      <p className="text-sm text-slate-500">
+        {isManager ? 'Open work across the whole team, by due date.' : 'Your open work, by due date.'}
+      </p>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {buckets.map((b) => (
@@ -150,7 +141,7 @@ export default function DeadlinesPage() {
           item={editing}
           defaultStatusId={statuses[0]?.id ?? ''}
           onClose={() => setEditing(null)}
-          onSaved={reload}
+          onSaved={onChanged}
         />
       )}
     </div>

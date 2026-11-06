@@ -2,7 +2,7 @@ import { env } from '../config/env.js'
 import { hashPassword } from '../auth/password.js'
 import { OWNER_SLUG } from '../auth/permissions.js'
 import { createInviteToken } from '../auth/tokens.js'
-import { query, transaction } from '../db/pool.js'
+import { isUniqueViolation, prisma } from '../db/prisma.js'
 import { can } from '../middleware/auth.js'
 import { Events } from '../realtime/events.js'
 import { broadcastToOrg, disconnectUser } from '../realtime/socket.js'
@@ -10,21 +10,19 @@ import { ApiError } from '../utils/ApiError.js'
 import { newId } from '../utils/time.js'
 import { permissionsForRole } from './accessControl.js'
 
-async function findRole(organizationId, roleId, connection) {
-  const rows = await query('SELECT id, slug, name FROM roles WHERE id = ? AND organization_id = ?', [roleId, organizationId], connection)
-  if (rows.length === 0) throw ApiError.badRequest('Choose a valid role.')
-  return rows[0]
+async function findRole(organizationId, roleId) {
+  const role = await prisma.role.findFirst({ where: { id: roleId, organizationId }, select: { id: true, slug: true, name: true } })
+  if (!role) throw ApiError.badRequest('Choose a valid role.')
+  return role
 }
 
 async function findMembership(organizationId, userId) {
-  const rows = await query(
-    `SELECT m.status, r.id AS role_id, r.slug AS role
-       FROM organization_members m JOIN roles r ON r.id = m.role_id
-      WHERE m.user_id = ? AND m.organization_id = ?`,
-    [userId, organizationId],
-  )
-  if (rows.length === 0) throw ApiError.notFound('Member not found.')
-  return rows[0]
+  const membership = await prisma.organizationMember.findUnique({
+    where: { organizationId_userId: { organizationId, userId } },
+    select: { status: true, role: { select: { id: true, slug: true } } },
+  })
+  if (!membership) throw ApiError.notFound('Member not found.')
+  return { status: membership.status, roleId: membership.role.id, role: membership.role.slug }
 }
 
 // Nobody can hand out the owner role, or a role that allows more than their own role does.
@@ -51,30 +49,24 @@ export async function inviteMember(auth, { fullName, email, roleId, password }) 
   const role = await findRole(auth.organizationId, roleId)
   await assertCanAssign(auth, role)
 
-  const existing = await query('SELECT id FROM users WHERE email = ?', [email])
-  if (existing.length > 0) throw ApiError.conflict('This email already has an account.')
+  if (await prisma.user.findUnique({ where: { email }, select: { id: true } })) throw ApiError.conflict('This email already has an account.')
 
   const userId = newId()
   const invite = password ? null : createInviteToken()
-  const expiresAt = new Date(Date.now() + env.auth.inviteTtlHours * 3600 * 1000)
-  const passwordHash = password ? await hashPassword(password) : null
-
   try {
-    await transaction(async (connection) => {
-      await query(
-        `INSERT INTO users (id, full_name, email, password_hash, invitation_token, invitation_expires_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [userId, fullName, email, passwordHash, invite?.tokenHash ?? null, invite ? expiresAt : null],
-        connection,
-      )
-      await query(
-        "INSERT INTO organization_members (id, organization_id, user_id, role_id, status) VALUES (?, ?, ?, ?, 'active')",
-        [newId(), auth.organizationId, userId, role.id],
-        connection,
-      )
+    await prisma.user.create({
+      data: {
+        id: userId,
+        fullName,
+        email,
+        passwordHash: password ? await hashPassword(password) : null,
+        invitationToken: invite?.tokenHash ?? null,
+        invitationExpiresAt: invite ? new Date(Date.now() + env.auth.inviteTtlHours * 3600 * 1000) : null,
+        memberships: { create: { id: newId(), organizationId: auth.organizationId, roleId: role.id, status: 'active' } },
+      },
     })
   } catch (error) {
-    if (error?.code === 'ER_DUP_ENTRY') throw ApiError.conflict('This email already has an account.')
+    if (isUniqueViolation(error)) throw ApiError.conflict('This email already has an account.')
     throw error
   }
 
@@ -91,11 +83,11 @@ export async function inviteMember(auth, { fullName, email, roleId, password }) 
 
 // Lets a pending sign-up in. Needs 'members.approve' (see routes).
 export async function approveMember(auth, id) {
-  const result = await query(
-    "UPDATE organization_members SET status = 'active' WHERE user_id = ? AND organization_id = ? AND status = 'pending'",
-    [id, auth.organizationId],
-  )
-  if (result.affectedRows !== 1) throw ApiError.notFound('No pending sign-up found for this person.')
+  const { count } = await prisma.organizationMember.updateMany({
+    where: { userId: id, organizationId: auth.organizationId, status: 'pending' },
+    data: { status: 'active' },
+  })
+  if (count !== 1) throw ApiError.notFound('No pending sign-up found for this person.')
   broadcastToOrg(auth.organizationId, Events.WORKSPACE_CHANGED, { section: 'members' })
 }
 
@@ -106,7 +98,10 @@ export async function updateMemberRole(auth, id, roleId) {
   const role = await findRole(auth.organizationId, roleId)
   await assertCanAssign(auth, role)
 
-  await query('UPDATE organization_members SET role_id = ? WHERE user_id = ? AND organization_id = ?', [role.id, id, auth.organizationId])
+  await prisma.organizationMember.update({
+    where: { organizationId_userId: { organizationId: auth.organizationId, userId: id } },
+    data: { roleId: role.id },
+  })
   broadcastToOrg(auth.organizationId, Events.WORKSPACE_CHANGED, { section: 'members' })
   // Their project list may change with the new role.
   broadcastToOrg(auth.organizationId, Events.PROJECTS_CHANGED, { action: 'roles' })
@@ -124,7 +119,7 @@ export async function removeMember(auth, id) {
 
   // A user belongs to one organization, so removing them deletes the account.
   // Foreign keys unassign their work items and end their sessions.
-  await query('DELETE FROM users WHERE id = ?', [id])
+  await prisma.user.delete({ where: { id } })
   disconnectUser(id)
 
   broadcastToOrg(auth.organizationId, Events.WORKSPACE_CHANGED, { section: 'members' })

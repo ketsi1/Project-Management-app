@@ -1,10 +1,12 @@
 # PM Backend
 
-Express + MySQL + Socket.IO API for the PM frontend in `../pm-frontend`. It implements every
-endpoint in `pm-frontend/src/api/httpApi.ts`, returns the JSON shapes in `pm-frontend/src/types.ts`,
-and pushes `workItems:changed` to connected browsers when tasks change.
+Express + Prisma (MySQL) + Socket.IO API for the PM frontend in `../frontend`. It implements every
+endpoint in `frontend/src/api/httpApi.ts`, returns the JSON shapes in `frontend/src/types.ts`,
+and pushes changes to connected browsers in real time.
 
-- **Node.js 20.12+** (tested on Node 24) and **MySQL 8.0+**
+- **Node.js 22.18+** (tested on Node 24; it runs Prisma's generated TypeScript client directly) and **MySQL 8.0+**
+- **Prisma 7** is the ORM: `prisma/schema.prisma` describes every table, Prisma Migrate handles
+  database changes, and all queries go through Prisma Client.
 - Authentication is built in: bcrypt password hashes, signed JWTs, our own Express middleware and
   role checks. No Passport or third-party auth service.
 
@@ -14,7 +16,7 @@ and pushes `workItems:changed` to connected browsers when tasks change.
 cd backend
 npm install
 cp .env.example .env          # then set DB_USER / DB_PASSWORD (and JWT_SECRET for production)
-npm run db:setup              # creates pm_database: schema.sql, demo data, roles, permissions, admin
+npm run db:setup              # applies migrations, then seeds roles, permissions, accounts, demo data
 npm run dev                   # http://localhost:4000/api, restarts on file changes
 ```
 
@@ -32,9 +34,9 @@ Seeded logins. All of them appear as one-click buttons on the login page while
 | admin@acme.com | Admin@12345 | Admin | `npm run seed:admin` |
 | manager@acme.com | Manager@12345 | Project Manager | `npm run seed:users` |
 | member@acme.com | Member@12345 | Member | `npm run seed:users` |
-| alex@acme.com | 87654321 | Owner | `database/seed.sql` (demo data) |
-| sarah@acme.com | 12345678 | Member | `database/seed.sql` (demo data) |
-| david@acme.com | 21345678 | Member | `database/seed.sql` (demo data) |
+| alex@acme.com | 87654321 | Owner | `npm run seed:demo` (demo data) |
+| sarah@acme.com | 12345678 | Member | `npm run seed:demo` (demo data) |
+| david@acme.com | 21345678 | Member | `npm run seed:demo` (demo data) |
 
 The seeded admin adds everyone else in Settings → Members, either with a password (they can
 log in right away) or with an invitation link. Nobody has to sign up. Change the seeded
@@ -63,20 +65,31 @@ origin to `CORS_ORIGIN`.
 |---|---|
 | `npm run dev` | Start with `node --watch` (restarts on changes) |
 | `npm start` | Start for production |
-| `npm run db:setup` | **Drops and recreates all tables** from `schema.sql`, loads `seed.sql`, marks migrations as applied. For a fresh database. |
-| `npm run db:migrate` | Applies new files in `database/migrations/` that haven't run yet (tracked in `schema_migrations`). Never drops data. Use this on an existing database. |
-| `npm run db:seed` / `npm run seed:demo` | Loads or refreshes the Acme Corp demo data. Safe to repeat. |
+| `npm run db:setup` | Fresh database: applies every migration, then seeds roles, permissions, accounts and the demo data. Never drops anything. |
+| `npm run db:migrate -- --name what_changed` | **Changing the database:** after editing `prisma/schema.prisma`, creates a migration in `prisma/migrations/` and applies it (development; asks before anything destructive). |
+| `npm run db:deploy` | Applies migrations that haven't run yet (production, other machines). Never drops data. |
+| `npm run db:status` | Shows which migrations are applied. |
+| `npm run db:reset` | **Drops everything**, re-applies all migrations and runs the seeders. Asks first. |
+| `npm run db:studio` | Opens Prisma Studio, a browser UI to look at and edit the data. |
+| `npm run db:generate` | Regenerates Prisma Client after a schema change (`db:migrate` and `npm install` do this too). |
+| `npm run db:seed` / `npm run seed:demo` | Adds the Acme Corp demo data (projects, tasks, bugs). Only adds what is missing; never changes your edits. |
 | `npm run seed` | Runs the four seeders below in order. Safe to repeat. |
 | `npm run seed:permissions` | Writes the permission catalog from `src/auth/permissions.js` into `permissions`. |
 | `npm run seed:roles` | Gives every organization the default roles (Owner, Admin, Project Manager, Member) with their permissions. Keeps changes admins made. |
-| `npm run seed:admin` | Creates the organization `SEED_ORG_NAME` if missing, and its admin account (`SEED_ADMIN_*`). |
+| `npm run seed:admin` | Creates the admin account (`SEED_ADMIN_*`) in the organization it already belongs to, or in `SEED_ORG_NAME` (created if missing). |
 | `npm run seed:users` | Creates one account per other role (`SEED_MANAGER_*`, `SEED_MEMBER_*`). |
 | `npm run seed:reset` | Same as `seed`, but puts default roles back to their default permissions and resets the seeded accounts' passwords and roles. |
 | `npm run smoke` | End-to-end check against a running server (`API_BASE` to override `http://localhost:4000`). Creates a new org each run; doesn't change the demo data. |
 
-**Existing database?** Run `npm run db:migrate` then `npm run seed`. Migration
-`004_roles_permissions.sql` moves every member onto a role with the same name, and
-`db:migrate` fills in the permissions, so nobody loses access.
+### Changing the database with Prisma
+
+1. Edit `prisma/schema.prisma` (add a model, a field, an index…).
+2. Run `npm run db:migrate -- --name add_due_time` in a terminal. Prisma writes the SQL into
+   `prisma/migrations/<timestamp>_add_due_time/`, applies it to your database and regenerates the client.
+3. Commit the schema and the new migration folder. Other machines run `npm run db:deploy`.
+
+The first migration, `0_init`, describes the database as it was when Prisma was introduced. It was
+marked as already applied on the existing database (a "baseline"), so it never re-runs over your data.
 
 ## Environment variables
 
@@ -98,6 +111,7 @@ All have development defaults; see `.env.example`.
 | `BCRYPT_ROUNDS` | `12` | bcrypt cost factor |
 | `INVITE_TTL_HOURS` | `72` | How long invitation links work |
 | `APP_URL` | `http://localhost:5173` | Used to build invitation links |
+| `DATABASE_URL` | built from `DB_*` | Optional. A full `mysql://user:pass@host:3306/db` URL instead of the `DB_*` values |
 | `SEED_ORG_NAME` | `Acme Corp` | Organization the seeders put their accounts in |
 | `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` / `SEED_ADMIN_NAME` | `admin@acme.com` / `Admin@12345` / `System Admin` | The admin `seed:admin` creates |
 | `SEED_MANAGER_*`, `SEED_MEMBER_*` | see `.env.example` | Accounts `seed:users` creates |
@@ -110,8 +124,9 @@ src/
   server.js            HTTP server + Socket.IO, startup DB check, graceful shutdown
   app.js               Express app: helmet, CORS, JSON body, routes, 404, error handler
   config/env.js        Reads and checks environment variables once
-  db/pool.js           mysql2 pool, query() and transaction() helpers
-  db/mappers.js        Database rows → frontend JSON shapes
+  db/prisma.js         The shared Prisma Client (MySQL through the MariaDB driver adapter)
+  db/mappers.js        Prisma records → frontend JSON shapes
+  generated/prisma/    Generated Prisma Client (not committed; `npm install` creates it)
   auth/                password.js (bcrypt), tokens.js (JWT), sessionStore.js (revocable sessions),
                        permissions.js (the permission catalog and default roles)
   config/seedAccounts.js  Seeded accounts (from SEED_* variables)
@@ -121,7 +136,12 @@ src/
   controllers/         Thin HTTP layer: read request, call service, send status code
   services/            Business rules and SQL, always scoped to the caller's organization
   realtime/            socket.js (token auth, rooms, broadcast), events.js (event names)
-scripts/               db-setup, db-migrate, db-seed, smoke-test, seed/ (role, permission and account seeders)
+prisma/
+  schema.prisma        Every table, column, index and relation
+  migrations/          SQL migrations created by Prisma Migrate
+  seed/                Seeders: roles, permissions, accounts (index.js) and demo data (demo.js)
+prisma.config.js       Prisma CLI settings (schema, migrations, seed command, connection)
+scripts/smoke-test.js  End-to-end check against a running server
 ```
 
 ## How it works

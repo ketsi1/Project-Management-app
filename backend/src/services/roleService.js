@@ -1,6 +1,6 @@
 // Roles and their permissions, managed by people whose role has 'roles.manage'.
 import { OWNER_SLUG, PERMISSION_KEYS, PERMISSIONS } from '../auth/permissions.js'
-import { query, transaction } from '../db/pool.js'
+import { prisma } from '../db/prisma.js'
 import { can } from '../middleware/auth.js'
 import { Events } from '../realtime/events.js'
 import { broadcastToOrg } from '../realtime/socket.js'
@@ -8,43 +8,41 @@ import { ApiError } from '../utils/ApiError.js'
 import { newId } from '../utils/time.js'
 import { setRolePermissions } from './accessControl.js'
 
+const ROLE_ORDER = ['owner', 'admin', 'manager', 'member']
+const rank = (slug) => (ROLE_ORDER.includes(slug) ? ROLE_ORDER.indexOf(slug) : ROLE_ORDER.length)
+
 // The permission catalog, for the role editor.
 export function listPermissions() {
   return PERMISSIONS.map(({ key, name, description, group }) => ({ key, name, description, group }))
 }
 
 export async function listRoles(organizationId) {
-  const [roles, grants, counts] = await Promise.all([
-    query('SELECT * FROM roles WHERE organization_id = ? ORDER BY is_system DESC, created_at ASC, name ASC', [organizationId]),
-    query(
-      `SELECT rp.role_id, p.\`key\` FROM role_permissions rp
-         JOIN permissions p ON p.id = rp.permission_id
-         JOIN roles r ON r.id = rp.role_id
-        WHERE r.organization_id = ?`,
-      [organizationId],
-    ),
-    query('SELECT role_id, COUNT(*) AS n FROM organization_members WHERE organization_id = ? GROUP BY role_id', [organizationId]),
-  ])
-  const order = ['owner', 'admin', 'manager', 'member']
-  const rank = (slug) => (order.includes(slug) ? order.indexOf(slug) : order.length)
+  const roles = await prisma.role.findMany({
+    where: { organizationId },
+    orderBy: [{ isSystem: 'desc' }, { createdAt: 'asc' }, { name: 'asc' }],
+    include: {
+      permissions: { select: { permission: { select: { key: true } } } },
+      _count: { select: { members: true } },
+    },
+  })
   return roles
     .map((r) => ({
       id: r.id,
       slug: r.slug,
       name: r.name,
       description: r.description,
-      isSystem: !!r.is_system,
+      isSystem: r.isSystem,
       locked: r.slug === OWNER_SLUG,
-      permissions: grants.filter((g) => g.role_id === r.id).map((g) => g.key).sort(),
-      memberCount: Number(counts.find((c) => c.role_id === r.id)?.n ?? 0),
+      permissions: r.permissions.map((p) => p.permission.key).sort(),
+      memberCount: r._count.members,
     }))
     .sort((a, b) => rank(a.slug) - rank(b.slug))
 }
 
 async function findRole(organizationId, id) {
-  const rows = await query('SELECT * FROM roles WHERE id = ? AND organization_id = ?', [id, organizationId])
-  if (rows.length === 0) throw ApiError.notFound('Role not found.')
-  return rows[0]
+  const role = await prisma.role.findFirst({ where: { id, organizationId } })
+  if (!role) throw ApiError.notFound('Role not found.')
+  return role
 }
 
 // You cannot give a role more than your own role allows (the owner can give anything).
@@ -66,7 +64,7 @@ const slugify = (name) =>
 
 async function uniqueSlug(organizationId, name) {
   const base = slugify(name)
-  const rows = await query('SELECT slug FROM roles WHERE organization_id = ? AND (slug = ? OR slug LIKE ?)', [organizationId, base, `${base}-%`])
+  const rows = await prisma.role.findMany({ where: { organizationId, slug: { startsWith: base } }, select: { slug: true } })
   const taken = new Set(rows.map((r) => r.slug))
   if (!taken.has(base)) return base
   let n = 2
@@ -74,13 +72,13 @@ async function uniqueSlug(organizationId, name) {
   return `${base}-${n}`
 }
 
-async function assertNameFree(organizationId, name, exceptId = null) {
-  const rows = await query('SELECT id FROM roles WHERE organization_id = ? AND name = ? AND id <> ?', [organizationId, name, exceptId ?? ''])
-  if (rows.length > 0) throw ApiError.conflict('A role with this name already exists.')
+async function assertNameFree(organizationId, name, exceptId) {
+  const clash = await prisma.role.findFirst({ where: { organizationId, name, ...(exceptId ? { id: { not: exceptId } } : {}) }, select: { id: true } })
+  if (clash) throw ApiError.conflict('A role with this name already exists.')
 }
 
-function changed(auth, section = 'roles') {
-  broadcastToOrg(auth.organizationId, Events.WORKSPACE_CHANGED, { section })
+function changed(auth) {
+  broadcastToOrg(auth.organizationId, Events.WORKSPACE_CHANGED, { section: 'roles' })
   // Visible projects can depend on permissions.
   broadcastToOrg(auth.organizationId, Events.PROJECTS_CHANGED, { action: 'roles' })
 }
@@ -90,9 +88,9 @@ export async function createRole(auth, { name, description, permissions }) {
   await assertNameFree(auth.organizationId, name)
   const id = newId()
   const slug = await uniqueSlug(auth.organizationId, name)
-  await transaction(async (connection) => {
-    await query('INSERT INTO roles (id, organization_id, slug, name, description, is_system) VALUES (?, ?, ?, ?, ?, FALSE)', [id, auth.organizationId, slug, name, description], connection)
-    await setRolePermissions(connection, id, permissions)
+  await prisma.$transaction(async (tx) => {
+    await tx.role.create({ data: { id, organizationId: auth.organizationId, slug, name, description, isSystem: false } })
+    await setRolePermissions(tx, id, permissions)
   })
   changed(auth)
   return (await listRoles(auth.organizationId)).find((r) => r.id === id)
@@ -107,9 +105,9 @@ export async function updateRole(auth, id, { name, description, permissions }) {
   assertGrantable(auth, permissions)
   await assertNameFree(auth.organizationId, name, id)
 
-  await transaction(async (connection) => {
-    await query('UPDATE roles SET name = ?, description = ? WHERE id = ?', [name, description, id], connection)
-    await setRolePermissions(connection, id, permissions)
+  await prisma.$transaction(async (tx) => {
+    await tx.role.update({ where: { id }, data: { name, description } })
+    await setRolePermissions(tx, id, permissions)
   })
   changed(auth)
   return (await listRoles(auth.organizationId)).find((r) => r.id === id)
@@ -117,9 +115,9 @@ export async function updateRole(auth, id, { name, description, permissions }) {
 
 export async function deleteRole(auth, id) {
   const role = await findRole(auth.organizationId, id)
-  if (role.is_system) throw ApiError.badRequest('Built-in roles cannot be deleted.')
-  const [{ n }] = await query('SELECT COUNT(*) AS n FROM organization_members WHERE role_id = ?', [id])
-  if (Number(n) > 0) throw ApiError.badRequest(`${n} member(s) still have this role. Give them another role first.`)
-  await query('DELETE FROM roles WHERE id = ? AND organization_id = ?', [id, auth.organizationId])
+  if (role.isSystem) throw ApiError.badRequest('Built-in roles cannot be deleted.')
+  const inUse = await prisma.organizationMember.count({ where: { roleId: id } })
+  if (inUse > 0) throw ApiError.badRequest(`${inUse} member(s) still have this role. Give them another role first.`)
+  await prisma.role.delete({ where: { id } })
   changed(auth)
 }

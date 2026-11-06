@@ -1,17 +1,16 @@
 import { useMemo, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router'
-import { BugStatusPill, SeverityBadge } from '../components/bugs/BugBadges'
-import BugFormModal from '../components/bugs/BugFormModal'
-import Avatar from '../components/ui/Avatar'
-import Button from '../components/ui/Button'
-import { Alert, EmptyState, LoadingState, StatCard } from '../components/ui/Display'
-import Icon from '../components/ui/Icon'
-import { useAuth } from '../context/authContext'
-import { useWorkspace } from '../context/workspaceContext'
-import { useBugs } from '../hooks/useBugs'
-import type { Bug, BugStatus } from '../types'
-import { isFinished, severityLabels, severityOrder, statusLabels, timeAgo } from '../utils/bugs'
-import { cn } from '../utils/format'
+import { useSearchParams } from 'react-router'
+import { useAuth } from '../../context/authContext'
+import { useWorkspace } from '../../context/workspaceContext'
+import type { Bug, BugStatus } from '../../types'
+import { isFinished, severityLabels, severityOrder, statusLabels, timeAgo } from '../../utils/bugs'
+import { cn } from '../../utils/format'
+import Avatar from '../ui/Avatar'
+import Button from '../ui/Button'
+import { Alert, EmptyState, LoadingState, StatCard } from '../ui/Display'
+import Icon from '../ui/Icon'
+import { BugStatusPill, SeverityBadge } from './BugBadges'
+import BugFormModal from './BugFormModal'
 
 type StatusTab = 'active' | 'all' | BugStatus
 
@@ -24,12 +23,19 @@ const tabs: Array<{ id: StatusTab; label: string; match: (b: Bug) => boolean }> 
   { id: 'all', label: 'All', match: () => true },
 ]
 
+interface BugsPanelProps {
+  bugs: Bug[]
+  loading: boolean
+  error: string
+  // Opens a bug's details (the Tasks page shows them in a drawer).
+  onOpen: (bugId: string) => void
+}
+
 // Every bug the person may see, with filters. Critical, unfinished bugs come first.
-export default function BugsPage() {
+// Shown on the Tasks page's Bugs filter.
+export default function BugsPanel({ bugs, loading, error, onOpen }: BugsPanelProps) {
   const { session, can } = useAuth()
   const { workspace, projects } = useWorkspace()
-  const { bugs, loading, error } = useBugs()
-  const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const me = session?.user.id
 
@@ -85,14 +91,10 @@ export default function BugsPage() {
   if (loading) return <LoadingState label="Loading bugs…" />
 
   return (
-    <div className="space-y-6 pb-10">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <div className="space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900">
-            <Icon name="bug" className="h-6 w-6 text-rose-500" />
-            Bugs
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="text-sm text-slate-500">
             {can('bugs.view_all') ? 'Every reported bug across the organization.' : 'Bugs you reported, bugs assigned to you, and bugs in your projects.'}
           </p>
         </div>
@@ -202,7 +204,7 @@ export default function BugsPage() {
                 <li key={bug.id}>
                   <button
                     type="button"
-                    onClick={() => navigate(`/app/bugs/${bug.id}`)}
+                    onClick={() => onOpen(bug.id)}
                     className="group flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50 focus-visible:bg-slate-50 focus-visible:outline-none sm:items-center"
                   >
                     <span className="mt-0.5 w-16 shrink-0 font-mono text-xs font-semibold text-slate-400 group-hover:text-indigo-600 sm:mt-0">{bug.key}</span>
@@ -247,7 +249,7 @@ export default function BugsPage() {
       </div>
 
       {reporting && (
-        <BugFormModal bug={null} defaultProjectId={projectId || undefined} onClose={() => setReporting(false)} onSaved={(bug) => navigate(`/app/bugs/${bug.id}`)} />
+        <BugFormModal bug={null} defaultProjectId={projectId || undefined} onClose={() => setReporting(false)} onSaved={(bug) => onOpen(bug.id)} />
       )}
     </div>
   )

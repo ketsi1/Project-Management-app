@@ -4,7 +4,7 @@
 // changes that organization's data, apart from read-only and permission-denied calls against Acme Corp.
 import { io } from 'socket.io-client'
 import { hashPassword } from '../src/auth/password.js'
-import { query, transaction } from '../src/db/pool.js'
+import { prisma } from '../src/db/prisma.js'
 import { ensureDefaultRoles } from '../src/services/accessControl.js'
 import { createStarterContent } from '../src/services/organizationSetup.js'
 import { newId } from '../src/utils/time.js'
@@ -14,16 +14,19 @@ async function createTestOrganization({ orgName, fullName, email, password }) {
   const organizationId = newId()
   const ownerId = newId()
   const passwordHash = await hashPassword(password)
-  await transaction(async (c) => {
-    await query('INSERT INTO organizations (id, name) VALUES (?, ?)', [organizationId, orgName], c)
-    await query('INSERT INTO users (id, full_name, email, password_hash) VALUES (?, ?, ?, ?)', [ownerId, fullName, email, passwordHash], c)
-    const roleIds = await ensureDefaultRoles(c, organizationId)
-    await query(
-      "INSERT INTO organization_members (id, organization_id, user_id, role_id, status) VALUES (?, ?, ?, ?, 'active')",
-      [newId(), organizationId, ownerId, roleIds.owner],
-      c,
-    )
-    await createStarterContent(c, { organizationId, ownerId })
+  await prisma.$transaction(async (tx) => {
+    await tx.organization.create({ data: { id: organizationId, name: orgName } })
+    const roleIds = await ensureDefaultRoles(tx, organizationId)
+    await tx.user.create({
+      data: {
+        id: ownerId,
+        fullName,
+        email,
+        passwordHash,
+        memberships: { create: { id: newId(), organizationId, roleId: roleIds.owner, status: 'active' } },
+      },
+    })
+    await createStarterContent(tx, { organizationId, ownerId })
   })
 }
 

@@ -1,23 +1,158 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import ListView from '../components/board/ListView'
 import WorkItemModal from '../components/board/WorkItemModal'
+import BugDetail from '../components/bugs/BugDetail'
+import BugsPanel from '../components/bugs/BugsPanel'
+import DeadlinesPanel from '../components/board/DeadlinesPanel'
 import Button from '../components/ui/Button'
 import { Alert, EmptyState, LoadingState } from '../components/ui/Display'
-import Icon from '../components/ui/Icon'
+import Drawer from '../components/ui/Drawer'
+import Icon, { type IconName } from '../components/ui/Icon'
 import { useAuth } from '../context/authContext'
 import { useWorkspace } from '../context/workspaceContext'
+import { useBugs } from '../hooks/useBugs'
 import { useWorkItems } from '../hooks/useWorkItems'
 import type { Priority, WorkItem } from '../types'
-import { isOverdue, priorityLabels } from '../utils/format'
+import { isFinished } from '../utils/bugs'
+import { cn, isOverdue, priorityLabels } from '../utils/format'
 
-// Every task in one place, grouped under its project.
-// Managers see the whole organization; employees see only their own tasks.
+type View = 'tasks' | 'deadlines' | 'bugs'
+const VIEWS: View[] = ['tasks', 'deadlines', 'bugs']
+
+// The Tasks page. A filter bar switches between the task list, deadlines and bugs.
+// The filter lives in the address (?view=bugs), so links and refreshes keep it;
+// ?bug=<id> opens that bug in a drawer. Managers see the whole organization; employees their own work.
 export default function TasksPage() {
   const { isManager, can } = useAuth()
+  const { workspace } = useWorkspace()
+  const { terminology } = workspace
+  const { items, loading, error, reload } = useWorkItems()
+  const bugs = useBugs()
+  const [params, setParams] = useSearchParams()
+  const [creating, setCreating] = useState(false)
+
+  const requested = params.get('view') as View | null
+  const view: View = requested && VIEWS.includes(requested) ? requested : 'tasks'
+  const openBugId = params.get('bug')
+
+  function update(changes: Record<string, string | null>) {
+    const next = new URLSearchParams(params)
+    for (const [key, value] of Object.entries(changes)) {
+      if (value) next.set(key, value)
+      else next.delete(key)
+    }
+    setParams(next, { replace: true })
+  }
+
+  const closeBug = useCallback(() => {
+    setParams(
+      (current) => {
+        const next = new URLSearchParams(current)
+        next.delete('bug')
+        return next
+      },
+      { replace: true },
+    )
+  }, [setParams])
+
+  if (loading) return <LoadingState label={`Loading ${terminology.tasks.toLowerCase()}…`} />
+
+  const tasksWord = terminology.tasks.toLowerCase()
+  const overdue = items.filter((item) => isOverdue(item, workspace.statuses)).length
+  const activeBugs = bugs.bugs.filter((b) => !isFinished(b.status)).length
+
+  const filters: Array<{ id: View; label: string; icon: IconName; count?: number; alert?: boolean; hint: string }> = [
+    { id: 'tasks', label: terminology.tasks, icon: 'list', count: items.length, hint: isManager ? `Every ${terminology.task.toLowerCase()}` : `Your ${tasksWord}` },
+    { id: 'deadlines', label: 'Deadlines', icon: 'calendar', count: overdue, alert: overdue > 0, hint: overdue > 0 ? `${overdue} overdue` : 'Nothing overdue' },
+    { id: 'bugs', label: 'Bugs', icon: 'bug', count: activeBugs, hint: `${activeBugs} active` },
+  ]
+
+  return (
+    <div className="space-y-6 pb-10">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">{isManager ? `All ${tasksWord}` : `My ${tasksWord}`}</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            {view === 'tasks' &&
+              (isManager
+                ? `Every ${terminology.task.toLowerCase()} across the organization, grouped by ${terminology.project.toLowerCase()}.`
+                : `Everything assigned to you, grouped by ${terminology.project.toLowerCase()}.`)}
+            {view === 'deadlines' && (isManager ? 'Open work across the whole team, by due date.' : 'Your open work, by due date.')}
+            {view === 'bugs' && (can('bugs.view_all') ? 'Every reported bug across the organization.' : 'Bugs you reported, bugs assigned to you, and bugs in your projects.')}
+          </p>
+        </div>
+        {view === 'tasks' && can('tasks.create') && (
+          <Button onClick={() => setCreating(true)}>
+            <Icon name="plus" className="h-4 w-4" />
+            New {terminology.task.toLowerCase()}
+          </Button>
+        )}
+      </div>
+
+      {/* Filter bar */}
+      <div role="tablist" aria-label="Show" className="grid grid-cols-3 gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-card sm:inline-grid sm:w-auto">
+        {filters.map((f) => {
+          const selected = view === f.id
+          return (
+            <button
+              key={f.id}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              title={f.hint}
+              onClick={() => update({ view: f.id === 'tasks' ? null : f.id, bug: null, project: f.id === 'bugs' ? params.get('project') : null })}
+              className={cn(
+                'flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition-colors sm:px-4',
+                selected ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+              )}
+            >
+              <Icon name={f.icon} className="h-4 w-4 shrink-0" />
+              <span className="truncate">{f.label}</span>
+              {!!f.count && (
+                <span
+                  className={cn(
+                    'rounded-full px-1.5 text-[11px] font-bold tabular-nums',
+                    selected ? 'bg-white/20 text-white' : f.alert ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600',
+                  )}
+                >
+                  {f.count}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      {error && <Alert>{error}</Alert>}
+
+      <div key={view} className="animate-fade-in">
+        {view === 'tasks' && <TaskList items={items} reload={reload} creating={creating} onCreatingChange={setCreating} />}
+        {view === 'deadlines' && <DeadlinesPanel items={items} onChanged={reload} />}
+        {view === 'bugs' && <BugsPanel bugs={bugs.bugs} loading={bugs.loading} error={bugs.error} onOpen={(id) => update({ view: 'bugs', bug: id })} />}
+      </div>
+
+      {openBugId && (
+        <Drawer title="Bug details" onClose={closeBug}>
+          <BugDetail key={openBugId} bugId={openBugId} onClose={closeBug} />
+        </Drawer>
+      )}
+    </div>
+  )
+}
+
+interface TaskListProps {
+  items: WorkItem[]
+  reload: () => void
+  creating: boolean
+  onCreatingChange: (creating: boolean) => void
+}
+
+// Every task in one place, grouped under its project, with filters.
+function TaskList({ items, reload, creating, onCreatingChange }: TaskListProps) {
+  const { isManager } = useAuth()
   const { workspace, projects } = useWorkspace()
   const { statuses, members, fields, terminology } = workspace
-  const { items, loading, error, reload } = useWorkItems()
   const [params, setParams] = useSearchParams()
 
   const [search, setSearch] = useState('')
@@ -27,7 +162,6 @@ export default function TasksPage() {
   const [overdueOnly, setOverdueOnly] = useState(false)
   const assigneeId = params.get('assignee') ?? '' // set from the Team page
   const [editing, setEditing] = useState<WorkItem | null>(null)
-  const [creating, setCreating] = useState(false)
 
   function setAssignee(value: string) {
     const next = new URLSearchParams(params)
@@ -35,8 +169,6 @@ export default function TasksPage() {
     else next.delete('assignee')
     setParams(next, { replace: true })
   }
-
-  if (loading) return <LoadingState label={`Loading ${terminology.tasks.toLowerCase()}…`} />
 
   const filtered = items.filter((item) => {
     if (search && !item.title.toLowerCase().includes(search.toLowerCase())) return false
@@ -57,26 +189,7 @@ export default function TasksPage() {
   const select = 'input-sm font-medium text-slate-700'
 
   return (
-    <div className="space-y-6 pb-10">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">{isManager ? `All ${terminology.tasks.toLowerCase()}` : `My ${terminology.tasks.toLowerCase()}`}</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {isManager
-              ? `Every ${terminology.task.toLowerCase()} across the organization, grouped by ${terminology.project.toLowerCase()}.`
-              : `Everything assigned to you, grouped by ${terminology.project.toLowerCase()}.`}
-          </p>
-        </div>
-        {can('tasks.create') && (
-          <Button onClick={() => setCreating(true)}>
-            <Icon name="plus" className="h-4 w-4" />
-            New {terminology.task.toLowerCase()}
-          </Button>
-        )}
-      </div>
-
-      {error && <Alert>{error}</Alert>}
-
+    <div className="space-y-6">
       {/* Filters */}
       <div className="surface flex flex-wrap items-center gap-2 p-3">
         <div className="relative min-w-[12rem] flex-1">
@@ -190,7 +303,7 @@ export default function TasksPage() {
           projectId={projectId || projects[0]?.id || ''}
           item={null}
           defaultStatusId={statuses[0]?.id ?? ''}
-          onClose={() => setCreating(false)}
+          onClose={() => onCreatingChange(false)}
           onSaved={reload}
         />
       )}

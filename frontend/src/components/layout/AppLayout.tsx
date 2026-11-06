@@ -51,10 +51,8 @@ export default function AppLayout() {
   const navItems: Array<{ to: string; label: string; icon: IconName; badge?: number; show: boolean }> = [
     { to: '/app', label: isManager ? 'Executive Dashboard' : 'My Workstation', icon: isManager ? 'dashboard' : 'target', show: true },
     { to: '/app/tasks', label: `${isManager ? 'All' : 'My'} ${tasksWord}`, icon: 'list', show: true },
-    { to: '/app/deadlines', label: 'Deadlines', icon: 'calendar', show: true },
-    { to: '/app/bugs', label: 'Bugs', icon: 'bug', show: true },
-    { to: '/app/team', label: 'Team', icon: 'users', show: can('members.view') },
-    { to: '/app/approvals', label: 'Approvals', icon: 'checkCircle', badge: pendingCount, show: can('members.approve') },
+    // The badge counts sign-ups waiting for approval, which are handled on the Team page.
+    { to: '/app/team', label: 'Team', icon: 'users', badge: can('members.approve') ? pendingCount : 0, show: canAny('members.view', 'members.approve') },
     { to: '/app/settings', label: 'Workspace Settings', icon: 'settings', show: canAny(...SETTINGS_PERMISSIONS) },
   ]
 

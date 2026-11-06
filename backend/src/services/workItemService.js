@@ -1,18 +1,18 @@
-import { query } from '../db/pool.js'
+import { prisma } from '../db/prisma.js'
 import { toWorkItem } from '../db/mappers.js'
 import { Events } from '../realtime/events.js'
 import { broadcastToOrg } from '../realtime/socket.js'
 import { ApiError } from '../utils/ApiError.js'
-import { newId } from '../utils/time.js'
-import { canSeeProject, managesAllTasks, seesAllProjects, visibleProjectsFilter } from './visibility.js'
+import { fromDateOnly, newId } from '../utils/time.js'
+import { canSeeProject, managesAllTasks, seesAllProjects, visibleProjectWhere } from './visibility.js'
 
 async function findItem(organizationId, id) {
-  const rows = await query('SELECT * FROM work_items WHERE id = ? AND organization_id = ?', [id, organizationId])
-  return rows[0] ? toWorkItem(rows[0]) : null
+  const item = await prisma.workItem.findFirst({ where: { id, organizationId } })
+  return item ? toWorkItem(item) : null
 }
 
-// Finds an item the caller is allowed to see. Employees only see items in their projects,
-// and get the same "not found" for items outside them, so nothing leaks.
+// Finds an item the caller is allowed to see. People who don't see every project get the same
+// "not found" for items outside their projects, so nothing leaks.
 async function findVisibleItem(auth, id) {
   const item = await findItem(auth.organizationId, id)
   if (!item) throw ApiError.notFound('Item not found.')
@@ -26,97 +26,72 @@ async function assertReferences(organizationId, { projectId, statusId, assigneeI
   const checks = []
   if (projectId !== undefined) {
     checks.push(
-      query('SELECT 1 FROM projects WHERE id = ? AND organization_id = ?', [projectId, organizationId]).then((rows) => {
-        if (rows.length === 0) throw ApiError.badRequest('Choose a valid project.')
+      prisma.project.findFirst({ where: { id: projectId, organizationId }, select: { id: true } }).then((found) => {
+        if (!found) throw ApiError.badRequest('Choose a valid project.')
       }),
     )
   }
   if (statusId !== undefined) {
     checks.push(
-      query('SELECT 1 FROM statuses WHERE id = ? AND organization_id = ?', [statusId, organizationId]).then((rows) => {
-        if (rows.length === 0) throw ApiError.badRequest('Choose a valid status.')
+      prisma.status.findFirst({ where: { id: statusId, organizationId }, select: { id: true } }).then((found) => {
+        if (!found) throw ApiError.badRequest('Choose a valid status.')
       }),
     )
   }
   if (assigneeId) {
     checks.push(
-      query("SELECT 1 FROM organization_members WHERE user_id = ? AND organization_id = ? AND status = 'active'", [assigneeId, organizationId]).then(
-        (rows) => {
-          if (rows.length === 0) throw ApiError.badRequest('The assignee is not a member of this organization.')
-        },
-      ),
+      prisma.organizationMember.findFirst({ where: { userId: assigneeId, organizationId, status: 'active' }, select: { id: true } }).then((found) => {
+        if (!found) throw ApiError.badRequest('The assignee is not a member of this organization.')
+      }),
     )
   }
   await Promise.all(checks)
 }
 
-// Roles that see all projects get every item. Everyone else gets the items in projects where at least one
-// item is assigned to them (so project progress still counts the whole project).
+// Request fields → Prisma data (due dates arrive as 'YYYY-MM-DD').
+function toData(input) {
+  const data = {}
+  for (const key of ['projectId', 'title', 'description', 'statusId', 'priority', 'assigneeId', 'customValues']) {
+    if (input[key] !== undefined) data[key] = input[key]
+  }
+  if (input.dueDate !== undefined) data.dueDate = fromDateOnly(input.dueDate)
+  return data
+}
+
+// Roles that see all projects get every item. Everyone else gets the items in projects where
+// at least one item is assigned to them (so project progress still counts the whole project).
 export async function listWorkItems(auth, projectId) {
-  const conditions = ['w.organization_id = ?']
-  const params = [auth.organizationId]
-
-  if (projectId) {
-    if (!seesAllProjects(auth) && !(await canSeeProject(auth, projectId))) throw ApiError.notFound('Project not found.')
-    conditions.push('w.project_id = ?')
-    params.push(projectId)
-  }
-  if (!seesAllProjects(auth)) {
-    const filter = visibleProjectsFilter(auth, 'w.project_id')
-    conditions.push(filter.sql)
-    params.push(...filter.params)
-  }
-
-  const rows = await query(`SELECT w.* FROM work_items w WHERE ${conditions.join(' AND ')} ORDER BY w.created_at ASC`, params)
-  return rows.map(toWorkItem)
+  if (projectId && !seesAllProjects(auth) && !(await canSeeProject(auth, projectId))) throw ApiError.notFound('Project not found.')
+  const items = await prisma.workItem.findMany({
+    where: {
+      organizationId: auth.organizationId,
+      ...(projectId ? { projectId } : {}),
+      ...(seesAllProjects(auth) ? {} : { project: visibleProjectWhere(auth) }),
+    },
+    orderBy: { createdAt: 'asc' },
+  })
+  return items.map(toWorkItem)
 }
 
 export async function createWorkItem(auth, input) {
   const { organizationId } = auth
   await assertReferences(organizationId, input)
-  // Employees can only add work to projects they can see.
+  // People who don't see every project can only add work to projects they can see.
   if (!seesAllProjects(auth) && !(await canSeeProject(auth, input.projectId))) throw ApiError.badRequest('Choose a valid project.')
 
-  const id = newId()
-  await query(
-    `INSERT INTO work_items
-       (id, organization_id, project_id, title, description, status_id, priority, assignee_id, due_date, custom_values, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      id,
-      organizationId,
-      input.projectId,
-      input.title,
-      input.description,
-      input.statusId,
-      input.priority,
-      input.assigneeId,
-      input.dueDate,
-      JSON.stringify(input.customValues),
-      auth.userId,
-    ],
-  )
-  const item = await findItem(organizationId, id)
-  broadcastToOrg(organizationId, Events.WORK_ITEMS_CHANGED, { action: 'created', id, projectId: item.projectId })
+  const created = await prisma.workItem.create({
+    data: { id: newId(), organizationId, createdById: auth.userId, ...toData(input) },
+  })
+  const item = toWorkItem(created)
+  broadcastToOrg(organizationId, Events.WORK_ITEMS_CHANGED, { action: 'created', id: item.id, projectId: item.projectId })
   return item
 }
 
-// Column names for each field PATCH may change.
-const COLUMNS = {
-  projectId: 'project_id',
-  title: 'title',
-  description: 'description',
-  statusId: 'status_id',
-  priority: 'priority',
-  assigneeId: 'assignee_id',
-  dueDate: 'due_date',
-  customValues: 'custom_values',
-}
-
+const EDITABLE = ['projectId', 'title', 'description', 'statusId', 'priority', 'assigneeId', 'dueDate', 'customValues']
 const sameValue = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
 
-// Without 'tasks.manage_all', people can fully edit items they created. On anyone else's item they may only
-// change the status, and only when the item is assigned to them.
+// Without 'tasks.manage_all', people can fully edit items they created. On anyone else's item
+// they may only change the status, and only when the item is assigned to them.
 async function assertCanUpdate(auth, item, changes) {
   if (managesAllTasks(auth) || item.createdById === auth.userId) {
     if (!seesAllProjects(auth) && changes.projectId !== undefined && !(await canSeeProject(auth, changes.projectId))) {
@@ -125,7 +100,7 @@ async function assertCanUpdate(auth, item, changes) {
     return
   }
   // Fields sent with their current value are not real changes (forms often send everything).
-  const changed = Object.keys(changes).filter((key) => key in COLUMNS && !sameValue(changes[key], item[key]))
+  const changed = Object.keys(changes).filter((key) => EDITABLE.includes(key) && !sameValue(changes[key], item[key]))
   if (item.assigneeId !== auth.userId) throw ApiError.forbidden('You can only update tasks assigned to you.')
   if (changed.some((key) => key !== 'statusId')) {
     throw ApiError.forbidden('You can only change the status of a task someone else created.')
@@ -138,17 +113,8 @@ export async function updateWorkItem(auth, id, changes) {
   await assertCanUpdate(auth, before, changes)
   await assertReferences(organizationId, changes)
 
-  const entries = Object.entries(changes).filter(([key]) => key in COLUMNS)
-  const assignments = entries.map(([key]) => `${COLUMNS[key]} = ?`)
-  const values = entries.map(([key, value]) => (key === 'customValues' ? JSON.stringify(value) : value))
-
-  // Always bump updated_at, even when the values sent equal the stored ones.
-  await query(
-    `UPDATE work_items SET ${[...assignments, 'updated_at = CURRENT_TIMESTAMP'].join(', ')} WHERE id = ? AND organization_id = ?`,
-    [...values, id, organizationId],
-  )
-
-  const item = await findItem(organizationId, id)
+  // updatedAt is bumped by Prisma even when the values sent equal the stored ones.
+  const item = toWorkItem(await prisma.workItem.update({ where: { id }, data: { ...toData(changes), updatedAt: new Date() } }))
   broadcastToOrg(organizationId, Events.WORK_ITEMS_CHANGED, { action: 'updated', id, projectId: item.projectId })
   if (before.projectId !== item.projectId) {
     broadcastToOrg(organizationId, Events.WORK_ITEMS_CHANGED, { action: 'moved', id, projectId: before.projectId })
@@ -164,6 +130,6 @@ export async function deleteWorkItem(auth, id) {
   if (!managesAllTasks(auth) && item.createdById !== auth.userId) {
     throw ApiError.forbidden('Your role can only delete tasks you created. You can change its status instead.')
   }
-  await query('DELETE FROM work_items WHERE id = ? AND organization_id = ?', [id, organizationId])
+  await prisma.workItem.delete({ where: { id } })
   broadcastToOrg(organizationId, Events.WORK_ITEMS_CHANGED, { action: 'deleted', id, projectId: item.projectId })
 }

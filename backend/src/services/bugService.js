@@ -6,14 +6,14 @@
 //   status, the assignee updates the status, and nobody else changes anything.
 // - Delete: 'bugs.manage', or the reporter while the bug is still open.
 // Status, assignee, severity, priority and project changes are written to the bug's activity log.
-import { query, transaction } from '../db/pool.js'
-import { toBug, toBugComment } from '../db/mappers.js'
+import { isUniqueViolation, prisma } from '../db/prisma.js'
+import { bugInclude, toBug, toBugComment } from '../db/mappers.js'
 import { can } from '../middleware/auth.js'
 import { Events } from '../realtime/events.js'
 import { broadcastToOrg } from '../realtime/socket.js'
 import { ApiError } from '../utils/ApiError.js'
 import { newId } from '../utils/time.js'
-import { canSeeProject, seesAllProjects, visibleProjectsFilter } from './visibility.js'
+import { canSeeProject, seesAllProjects, visibleProjectWhere } from './visibility.js'
 
 const STATUS_LABELS = { open: 'Open', in_progress: 'In progress', resolved: 'Resolved', closed: 'Closed' }
 const RESOLUTION_LABELS = { fixed: 'Fixed', wont_fix: 'Won’t fix', duplicate: 'Duplicate', cannot_reproduce: 'Cannot reproduce', by_design: 'By design' }
@@ -21,35 +21,17 @@ const SEVERITY_LABELS = { critical: 'Critical', major: 'Major', minor: 'Minor', 
 const PRIORITY_LABELS = { low: 'Low', medium: 'Medium', high: 'High', urgent: 'Urgent' }
 const FINISHED = ['resolved', 'closed']
 
-// Which request fields map to which column, and who may change them.
-const COLUMNS = {
-  projectId: 'project_id',
-  workItemId: 'work_item_id',
-  title: 'title',
-  description: 'description',
-  stepsToReproduce: 'steps_to_reproduce',
-  expectedResult: 'expected_result',
-  actualResult: 'actual_result',
-  environment: 'environment',
-  severity: 'severity',
-  priority: 'priority',
-  status: 'status',
-  resolution: 'resolution',
-  assigneeId: 'assignee_id',
-}
+// Fields PATCH may change, and who may change them.
+const FIELDS = ['projectId', 'workItemId', 'title', 'description', 'stepsToReproduce', 'expectedResult', 'actualResult', 'environment', 'severity', 'priority', 'status', 'resolution', 'assigneeId']
 const DETAIL_FIELDS = ['projectId', 'workItemId', 'title', 'description', 'stepsToReproduce', 'expectedResult', 'actualResult', 'environment', 'severity']
 const STATUS_FIELDS = ['status', 'resolution']
 
 const managesBugs = (auth) => can(auth, 'bugs.manage')
 const seesAllBugs = (auth) => can(auth, 'bugs.view_all') || seesAllProjects(auth)
 
-const BUG_SELECT = `SELECT b.*,
-  (SELECT COUNT(*) FROM bug_comments c WHERE c.bug_id = b.id AND c.kind = 'comment') AS comment_count
-  FROM bugs b`
-
 async function findBug(organizationId, id) {
-  const rows = await query(`${BUG_SELECT} WHERE b.id = ? AND b.organization_id = ?`, [id, organizationId])
-  return rows[0] ? toBug(rows[0]) : null
+  const bug = await prisma.bug.findFirst({ where: { id, organizationId }, include: bugInclude })
+  return bug ? toBug(bug) : null
 }
 
 async function canSeeBug(auth, bug) {
@@ -69,30 +51,23 @@ async function findVisibleBug(auth, id) {
 async function assertReferences(auth, { projectId, workItemId, assigneeId }, current = {}) {
   const project = projectId ?? current.projectId
   if (projectId !== undefined) {
-    const rows = await query('SELECT 1 FROM projects WHERE id = ? AND organization_id = ?', [projectId, auth.organizationId])
-    if (rows.length === 0) throw ApiError.badRequest('Choose a valid project.')
-    if (!seesAllProjects(auth) && !(await canSeeProject(auth, projectId)) && projectId !== current.projectId) {
-      throw ApiError.badRequest('Choose a valid project.')
-    }
+    const found = await prisma.project.findFirst({ where: { id: projectId, organizationId: auth.organizationId }, select: { id: true } })
+    if (!found) throw ApiError.badRequest('Choose a valid project.')
+    if (projectId !== current.projectId && !(await canSeeProject(auth, projectId))) throw ApiError.badRequest('Choose a valid project.')
   }
   if (workItemId) {
-    const rows = await query('SELECT project_id FROM work_items WHERE id = ? AND organization_id = ?', [workItemId, auth.organizationId])
-    if (rows.length === 0) throw ApiError.badRequest('Choose a valid task to link.')
-    if (rows[0].project_id !== project) throw ApiError.badRequest('The linked task must be in the same project as the bug.')
+    const task = await prisma.workItem.findFirst({ where: { id: workItemId, organizationId: auth.organizationId }, select: { projectId: true } })
+    if (!task) throw ApiError.badRequest('Choose a valid task to link.')
+    if (task.projectId !== project) throw ApiError.badRequest('The linked task must be in the same project as the bug.')
   }
   if (assigneeId) {
-    const rows = await query("SELECT 1 FROM organization_members WHERE user_id = ? AND organization_id = ? AND status = 'active'", [assigneeId, auth.organizationId])
-    if (rows.length === 0) throw ApiError.badRequest('The assignee is not a member of this organization.')
+    const member = await prisma.organizationMember.findFirst({ where: { userId: assigneeId, organizationId: auth.organizationId, status: 'active' }, select: { id: true } })
+    if (!member) throw ApiError.badRequest('The assignee is not a member of this organization.')
   }
 }
 
-async function addEvent(auth, bugId, body, connection) {
-  await query(
-    "INSERT INTO bug_comments (id, organization_id, bug_id, author_id, kind, body) VALUES (?, ?, ?, ?, 'event', ?)",
-    [newId(), auth.organizationId, bugId, auth.userId, body],
-    connection,
-  )
-}
+const addEvent = (db, auth, bugId, body) =>
+  db.bugComment.create({ data: { id: newId(), organizationId: auth.organizationId, bugId, authorId: auth.userId, kind: 'event', body } })
 
 function changed(auth, action, bug) {
   broadcastToOrg(auth.organizationId, Events.BUGS_CHANGED, { action, id: bug.id, projectId: bug.projectId })
@@ -101,30 +76,25 @@ function changed(auth, action, bug) {
 // --- Reading ---------------------------------------------------------------------
 
 export async function listBugs(auth, projectId) {
-  const conditions = ['b.organization_id = ?']
-  const params = [auth.organizationId]
-  if (projectId) {
-    conditions.push('b.project_id = ?')
-    params.push(projectId)
-  }
-  if (!seesAllBugs(auth)) {
-    const filter = visibleProjectsFilter(auth, 'b.project_id')
-    conditions.push(`(b.reporter_id = ? OR b.assignee_id = ? OR ${filter.sql})`)
-    params.push(auth.userId, auth.userId, ...filter.params)
-  }
-  const rows = await query(`${BUG_SELECT} WHERE ${conditions.join(' AND ')} ORDER BY b.number DESC`, params)
-  return rows.map(toBug)
+  const visibility = seesAllBugs(auth)
+    ? {}
+    : { OR: [{ reporterId: auth.userId }, { assigneeId: auth.userId }, { project: visibleProjectWhere(auth) }] }
+  const bugs = await prisma.bug.findMany({
+    where: { organizationId: auth.organizationId, ...(projectId ? { projectId } : {}), ...visibility },
+    include: bugInclude,
+    orderBy: { number: 'desc' },
+  })
+  return bugs.map(toBug)
 }
 
 export async function getBug(auth, id) {
   const bug = await findVisibleBug(auth, id)
-  const rows = await query(
-    `SELECT c.*, u.full_name AS author_name FROM bug_comments c
-       LEFT JOIN users u ON u.id = c.author_id
-      WHERE c.bug_id = ? ORDER BY c.seq ASC`,
-    [id],
-  )
-  return { ...bug, comments: rows.map(toBugComment) }
+  const comments = await prisma.bugComment.findMany({
+    where: { bugId: id },
+    include: { author: { select: { fullName: true } } },
+    orderBy: { seq: 'asc' },
+  })
+  return { ...bug, comments: comments.map(toBugComment) }
 }
 
 // --- Reporting -------------------------------------------------------------------
@@ -137,36 +107,14 @@ export async function createBug(auth, input) {
   // Bug numbers count up per organization. If two reports race for the same number, try again.
   for (let attempt = 1; ; attempt += 1) {
     try {
-      await transaction(async (connection) => {
-        const [{ next }] = await query('SELECT COALESCE(MAX(number), 0) + 1 AS next FROM bugs WHERE organization_id = ? FOR UPDATE', [auth.organizationId], connection)
-        await query(
-          `INSERT INTO bugs (id, organization_id, project_id, work_item_id, number, title, description, steps_to_reproduce,
-                             expected_result, actual_result, environment, severity, priority, reporter_id, assignee_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            id,
-            auth.organizationId,
-            input.projectId,
-            input.workItemId,
-            next,
-            input.title,
-            input.description,
-            input.stepsToReproduce,
-            input.expectedResult,
-            input.actualResult,
-            input.environment,
-            input.severity,
-            input.priority,
-            auth.userId,
-            input.assigneeId,
-          ],
-          connection,
-        )
-        await addEvent(auth, id, 'reported this bug', connection)
+      await prisma.$transaction(async (tx) => {
+        const [{ next }] = await tx.$queryRaw`SELECT COALESCE(MAX(number), 0) + 1 AS next FROM bugs WHERE organization_id = ${auth.organizationId} FOR UPDATE`
+        await tx.bug.create({ data: { id, organizationId: auth.organizationId, number: Number(next), reporterId: auth.userId, ...input } })
+        await addEvent(tx, auth, id, 'reported this bug')
       })
       break
     } catch (error) {
-      if (error?.code !== 'ER_DUP_ENTRY' || attempt >= 3) throw error
+      if (!isUniqueViolation(error) || attempt >= 3) throw error
     }
   }
   const bug = await findBug(auth.organizationId, id)
@@ -194,33 +142,29 @@ export async function updateBug(auth, id, changes) {
   const before = await findVisibleBug(auth, id)
 
   // Fields sent with their current value are not real changes (forms often send everything).
-  const keys = Object.keys(changes).filter((k) => k in COLUMNS && !same(changes[k], before[k]))
+  const keys = Object.keys(changes).filter((k) => FIELDS.includes(k) && !same(changes[k], before[k]))
   if (keys.length === 0) return before
   assertCanChange(auth, before, keys)
   await assertReferences(auth, Object.fromEntries(keys.map((k) => [k, changes[k]])), before)
 
   const next = { ...before, ...Object.fromEntries(keys.map((k) => [k, changes[k]])) }
   // A finished bug always has a resolution (default: fixed); reopening clears it.
-  if (FINISHED.includes(next.status)) next.resolution = next.resolution ?? 'fixed'
-  else next.resolution = null
+  next.resolution = FINISHED.includes(next.status) ? (next.resolution ?? 'fixed') : null
   // Moving to another project unlinks a task from the old project.
   if (next.projectId !== before.projectId && !keys.includes('workItemId')) next.workItemId = null
 
-  const columns = Object.keys(COLUMNS).filter((k) => !same(next[k], before[k]))
-  const sets = columns.map((k) => `${COLUMNS[k]} = ?`)
-  const values = columns.map((k) => next[k])
+  const data = Object.fromEntries(FIELDS.filter((k) => !same(next[k], before[k])).map((k) => [k, next[k]]))
   if (next.status !== before.status) {
-    if (next.status === 'resolved') sets.push('resolved_at = CURRENT_TIMESTAMP', 'closed_at = NULL')
-    else if (next.status === 'closed') sets.push('resolved_at = COALESCE(resolved_at, CURRENT_TIMESTAMP)', 'closed_at = CURRENT_TIMESTAMP')
-    else sets.push('resolved_at = NULL', 'closed_at = NULL')
+    const now = new Date()
+    if (next.status === 'resolved') Object.assign(data, { resolvedAt: now, closedAt: null })
+    else if (next.status === 'closed') Object.assign(data, { resolvedAt: before.resolvedAt ? new Date(before.resolvedAt) : now, closedAt: now })
+    else Object.assign(data, { resolvedAt: null, closedAt: null })
   }
 
   const events = await describeChanges(auth, before, next)
-  await transaction(async (connection) => {
-    if (sets.length > 0) {
-      await query(`UPDATE bugs SET ${[...sets, 'updated_at = CURRENT_TIMESTAMP'].join(', ')} WHERE id = ? AND organization_id = ?`, [...values, id, auth.organizationId], connection)
-    }
-    for (const text of events) await addEvent(auth, id, text, connection)
+  await prisma.$transaction(async (tx) => {
+    await tx.bug.update({ where: { id }, data: { ...data, updatedAt: new Date() } })
+    for (const text of events) await addEvent(tx, auth, id, text)
   })
 
   const bug = await findBug(auth.organizationId, id)
@@ -241,14 +185,14 @@ async function describeChanges(auth, before, next) {
     if (!next.assigneeId) events.push('unassigned this bug')
     else if (next.assigneeId === auth.userId) events.push('assigned this bug to themselves')
     else {
-      const [user] = await query('SELECT full_name FROM users WHERE id = ?', [next.assigneeId])
-      events.push(`assigned this bug to ${user?.full_name ?? 'someone'}`)
+      const user = await prisma.user.findUnique({ where: { id: next.assigneeId }, select: { fullName: true } })
+      events.push(`assigned this bug to ${user?.fullName ?? 'someone'}`)
     }
   }
   if (next.severity !== before.severity) events.push(`changed the severity from ${SEVERITY_LABELS[before.severity]} to ${SEVERITY_LABELS[next.severity]}`)
   if (next.priority !== before.priority) events.push(`changed the priority from ${PRIORITY_LABELS[before.priority]} to ${PRIORITY_LABELS[next.priority]}`)
   if (next.projectId !== before.projectId) {
-    const [project] = await query('SELECT name FROM projects WHERE id = ?', [next.projectId])
+    const project = await prisma.project.findUnique({ where: { id: next.projectId }, select: { name: true } })
     events.push(`moved this bug to ${project?.name ?? 'another project'}`)
   }
   return events
@@ -260,7 +204,7 @@ export async function deleteBug(auth, id) {
   if (!managesBugs(auth) && !reporterMayDelete) {
     throw ApiError.forbidden('Only people who triage bugs can delete it. Reporters can delete their own bug while it is still open.')
   }
-  await query('DELETE FROM bugs WHERE id = ? AND organization_id = ?', [id, auth.organizationId])
+  await prisma.bug.delete({ where: { id } })
   changed(auth, 'deleted', bug)
 }
 
@@ -268,16 +212,13 @@ export async function deleteBug(auth, id) {
 
 export async function addComment(auth, bugId, { body }) {
   const bug = await findVisibleBug(auth, bugId)
-  const id = newId()
-  await query("INSERT INTO bug_comments (id, organization_id, bug_id, author_id, kind, body) VALUES (?, ?, ?, ?, 'comment', ?)", [
-    id,
-    auth.organizationId,
-    bugId,
-    auth.userId,
-    body,
+  const [comment] = await prisma.$transaction([
+    prisma.bugComment.create({
+      data: { id: newId(), organizationId: auth.organizationId, bugId, authorId: auth.userId, kind: 'comment', body },
+      include: { author: { select: { fullName: true } } },
+    }),
+    prisma.bug.update({ where: { id: bugId }, data: { updatedAt: new Date() } }),
   ])
-  await query('UPDATE bugs SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', [bugId])
   changed(auth, 'commented', bug)
-  const rows = await query('SELECT c.*, u.full_name AS author_name FROM bug_comments c LEFT JOIN users u ON u.id = c.author_id WHERE c.id = ?', [id])
-  return toBugComment(rows[0])
+  return toBugComment(comment)
 }

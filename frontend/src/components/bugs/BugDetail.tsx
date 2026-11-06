@@ -1,29 +1,28 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { Link, useNavigate, useParams } from 'react-router'
-import { api } from '../api'
-import { errorMessage } from '../api/ApiError'
-import { BugStatusPill, SeverityBadge } from '../components/bugs/BugBadges'
-import BugFormModal from '../components/bugs/BugFormModal'
-import Avatar from '../components/ui/Avatar'
-import Button from '../components/ui/Button'
-import { Alert, EmptyState, LoadingState, PriorityBadge } from '../components/ui/Display'
-import Icon from '../components/ui/Icon'
-import { useAuth } from '../context/authContext'
-import { useWorkspace } from '../context/workspaceContext'
-import { onRealtime } from '../realtime/socket'
-import type { BugChanges, BugDetail, BugResolution, BugSeverity, BugStatus, Priority, WorkItem } from '../types'
-import { isFinished, resolutionLabels, severityLabels, severityOrder, statusLabels, statusOrder, timeAgo } from '../utils/bugs'
-import { cn, priorityLabels } from '../utils/format'
+import { Link } from 'react-router'
+import { api } from '../../api'
+import { errorMessage } from '../../api/ApiError'
+import { useAuth } from '../../context/authContext'
+import { useWorkspace } from '../../context/workspaceContext'
+import { onRealtime } from '../../realtime/socket'
+import type { BugChanges, BugDetail as BugDetailData, BugResolution, BugSeverity, BugStatus, Priority, WorkItem } from '../../types'
+import { isFinished, resolutionLabels, severityLabels, severityOrder, statusLabels, statusOrder, timeAgo } from '../../utils/bugs'
+import { cn, priorityLabels } from '../../utils/format'
+import Avatar from '../ui/Avatar'
+import Button from '../ui/Button'
+import { Alert, EmptyState, LoadingState, PriorityBadge } from '../ui/Display'
+import Icon from '../ui/Icon'
+import { BugStatusPill, SeverityBadge } from './BugBadges'
+import BugFormModal from './BugFormModal'
 
 // One bug: what is wrong, how to reproduce it, who is on it, and its discussion and history.
-export default function BugDetailPage() {
-  const { bugId = '' } = useParams()
+// Shown in a drawer on the Tasks page's Bugs filter.
+export default function BugDetail({ bugId, onClose }: { bugId: string; onClose: () => void }) {
   const { session, can } = useAuth()
   const { workspace, projects } = useWorkspace()
-  const navigate = useNavigate()
   const me = session?.user.id
 
-  const [bug, setBug] = useState<BugDetail | null>(null)
+  const [bug, setBug] = useState<BugDetailData | null>(null)
   const [linkedTask, setLinkedTask] = useState<WorkItem | null>(null)
   const [loadError, setLoadError] = useState('')
   const [error, setError] = useState('')
@@ -55,7 +54,7 @@ export default function BugDetailPage() {
   if (loadError) {
     return (
       <div className="surface">
-        <EmptyState icon="bug" title="This bug is not available" description={loadError} action={<Button onClick={() => navigate('/app/bugs')}>Back to bugs</Button>} />
+        <EmptyState icon="bug" title="This bug is not available" description={loadError} action={<Button onClick={onClose}>Close</Button>} />
       </div>
     )
   }
@@ -89,7 +88,7 @@ export default function BugDetailPage() {
     if (!window.confirm(`Delete ${bug!.key}? Its comments and history are deleted too.`)) return
     try {
       await api.deleteBug(bugId)
-      navigate('/app/bugs')
+      onClose()
     } catch (e) {
       setError(errorMessage(e))
     }
@@ -135,14 +134,9 @@ export default function BugDetailPage() {
 
   return (
     <div className="space-y-5 pb-10">
-      <Link to="/app/bugs" className="inline-flex items-center gap-1 text-sm font-medium text-slate-500 transition-colors hover:text-indigo-600">
-        <Icon name="chevronRight" className="h-4 w-4 rotate-180" />
-        All bugs
-      </Link>
-
       {/* Header */}
       <header className="surface p-4 sm:p-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex flex-col gap-4">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-mono text-sm font-semibold text-slate-400">{bug.key}</span>
@@ -154,7 +148,7 @@ export default function BugDetailPage() {
               Reported by {memberName(bug.reporterId) ?? 'someone'} {timeAgo(bug.createdAt)} in {project?.name ?? 'a project'}
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2 lg:shrink-0 lg:justify-end">
+          <div className="flex flex-wrap items-center gap-2">
             {canChangeStatus && (
               <>
                 {offersResolution && (
@@ -197,7 +191,7 @@ export default function BugDetailPage() {
 
       {error && <Alert>{error}</Alert>}
 
-      <div className="grid gap-5 xl:grid-cols-[1fr_20rem]">
+      <div className="grid gap-5 lg:grid-cols-[1fr_17rem]">
         {/* Main column */}
         <div className="min-w-0 space-y-5">
           {(bug.expectedResult || bug.actualResult) && (
@@ -270,7 +264,7 @@ export default function BugDetailPage() {
         </div>
 
         {/* Sidebar */}
-        <aside className="surface h-fit divide-y divide-slate-100 xl:sticky xl:top-6">
+        <aside className="surface h-fit divide-y divide-slate-100 lg:sticky lg:top-0">
           <Field label="Status">
             {canChangeStatus ? (
               <select

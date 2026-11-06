@@ -1,57 +1,37 @@
-import { query } from '../db/pool.js'
+import { prisma } from '../db/prisma.js'
 import { toProject } from '../db/mappers.js'
 import { Events } from '../realtime/events.js'
 import { broadcastToOrg } from '../realtime/socket.js'
 import { ApiError } from '../utils/ApiError.js'
 import { newId } from '../utils/time.js'
-import { seesAllProjects, visibleProjectsFilter } from './visibility.js'
-
-async function findProject(organizationId, id) {
-  const rows = await query('SELECT * FROM projects WHERE id = ? AND organization_id = ?', [id, organizationId])
-  if (rows.length === 0) throw ApiError.notFound('Project not found.')
-  return toProject(rows[0])
-}
+import { seesAllProjects, visibleProjectWhere } from './visibility.js'
 
 // Roles with 'projects.view_all' see every project; everyone else only those with a work item assigned to them.
 export async function listProjects(auth) {
-  const filter = seesAllProjects(auth) ? null : visibleProjectsFilter(auth, 'p.id')
-  const rows = await query(
-    `SELECT p.* FROM projects p
-      WHERE p.organization_id = ?${filter ? ` AND ${filter.sql}` : ''}
-      ORDER BY p.created_at ASC, p.name ASC`,
-    [auth.organizationId, ...(filter?.params ?? [])],
-  )
-  return rows.map(toProject)
+  const projects = await prisma.project.findMany({
+    where: { organizationId: auth.organizationId, ...(seesAllProjects(auth) ? {} : visibleProjectWhere(auth)) },
+    orderBy: [{ createdAt: 'asc' }, { name: 'asc' }],
+  })
+  return projects.map(toProject)
 }
 
 export async function createProject(organizationId, { name, description }) {
-  const id = newId()
-  await query('INSERT INTO projects (id, organization_id, name, description) VALUES (?, ?, ?, ?)', [
-    id,
-    organizationId,
-    name,
-    description,
-  ])
-  broadcastToOrg(organizationId, Events.PROJECTS_CHANGED, { action: 'created', id })
-  return findProject(organizationId, id)
+  const project = await prisma.project.create({ data: { id: newId(), organizationId, name, description } })
+  broadcastToOrg(organizationId, Events.PROJECTS_CHANGED, { action: 'created', id: project.id })
+  return toProject(project)
 }
 
 export async function updateProject(organizationId, id, { name, description }) {
-  const result = await query('UPDATE projects SET name = ?, description = ? WHERE id = ? AND organization_id = ?', [
-    name,
-    description,
-    id,
-    organizationId,
-  ])
-  if (result.affectedRows === 0) throw ApiError.notFound('Project not found.')
+  const { count } = await prisma.project.updateMany({ where: { id, organizationId }, data: { name, description } })
+  if (count === 0) throw ApiError.notFound('Project not found.')
   broadcastToOrg(organizationId, Events.PROJECTS_CHANGED, { action: 'updated', id })
-  return findProject(organizationId, id)
+  return toProject(await prisma.project.findUnique({ where: { id } }))
 }
 
-// Work items go with the project (ON DELETE CASCADE).
+// Work items and bugs go with the project (ON DELETE CASCADE).
 export async function deleteProject(organizationId, id) {
-  const result = await query('DELETE FROM projects WHERE id = ? AND organization_id = ?', [id, organizationId])
-  if (result.affectedRows === 0) throw ApiError.notFound('Project not found.')
+  const { count } = await prisma.project.deleteMany({ where: { id, organizationId } })
+  if (count === 0) throw ApiError.notFound('Project not found.')
   broadcastToOrg(organizationId, Events.PROJECTS_CHANGED, { action: 'deleted', id })
   broadcastToOrg(organizationId, Events.WORK_ITEMS_CHANGED, { action: 'deleted', projectId: id })
 }

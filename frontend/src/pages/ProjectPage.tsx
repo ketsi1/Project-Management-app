@@ -136,7 +136,7 @@ function ProjectBoard({ projectId }: { projectId: string }) {
           </div>
 
           <div className="flex flex-wrap items-center gap-2 lg:shrink-0">
-            <Button variant="secondary" onClick={() => navigate(`/app/bugs?project=${projectId}`)}>
+            <Button variant="secondary" onClick={() => navigate(`/app/tasks?view=bugs&project=${projectId}`)}>
               <Icon name="bug" className="h-3.5 w-3.5" />
               Bugs
             </Button>

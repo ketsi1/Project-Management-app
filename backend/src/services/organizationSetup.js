@@ -1,5 +1,5 @@
 // The starter content every new organization gets (same as mockApi.ts seedOrganization).
-import { query } from '../db/pool.js'
+import { prisma } from '../db/prisma.js'
 import { daysFromToday, newId } from '../utils/time.js'
 
 const DEFAULT_STATUSES = [
@@ -16,32 +16,31 @@ const SAMPLE_ITEMS = [
   { title: 'Create your account', status: 3, priority: 'low', days: -1 },
 ]
 
-export async function createStarterContent(connection, { organizationId, ownerId }) {
-  const statusIds = []
-  for (const [position, status] of DEFAULT_STATUSES.entries()) {
-    const id = newId()
-    statusIds.push(id)
-    await query(
-      'INSERT INTO statuses (id, organization_id, name, category, color, position) VALUES (?, ?, ?, ?, ?, ?)',
-      [id, organizationId, status.name, status.category, status.color, position],
-      connection,
-    )
-  }
+// `db` can be a transaction client.
+export async function createStarterContent(db = prisma, { organizationId, ownerId }) {
+  const statusIds = DEFAULT_STATUSES.map(() => newId())
+  await db.status.createMany({
+    data: DEFAULT_STATUSES.map((status, position) => ({ id: statusIds[position], organizationId, position, ...status })),
+  })
 
   const projectId = newId()
-  await query(
-    'INSERT INTO projects (id, organization_id, name, description) VALUES (?, ?, ?, ?)',
-    [projectId, organizationId, 'Getting started', 'A sample project to explore the board.'],
-    connection,
-  )
+  await db.project.create({
+    data: { id: projectId, organizationId, name: 'Getting started', description: 'A sample project to explore the board.' },
+  })
 
-  for (const item of SAMPLE_ITEMS) {
-    await query(
-      `INSERT INTO work_items
-         (id, organization_id, project_id, title, description, status_id, priority, assignee_id, due_date, custom_values, created_by)
-       VALUES (?, ?, ?, ?, '', ?, ?, ?, ?, '{}', ?)`,
-      [newId(), organizationId, projectId, item.title, statusIds[item.status], item.priority, ownerId, daysFromToday(item.days), ownerId],
-      connection,
-    )
-  }
+  await db.workItem.createMany({
+    data: SAMPLE_ITEMS.map((item) => ({
+      id: newId(),
+      organizationId,
+      projectId,
+      title: item.title,
+      description: '',
+      statusId: statusIds[item.status],
+      priority: item.priority,
+      assigneeId: ownerId,
+      dueDate: daysFromToday(item.days),
+      customValues: {},
+      createdById: ownerId,
+    })),
+  })
 }

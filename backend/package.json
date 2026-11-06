@@ -1,40 +1,48 @@
 {
   "name": "pm-backend",
   "version": "1.0.0",
-  "description": "Express + MySQL + Socket.IO backend for the PM frontend",
+  "description": "Express + Prisma (MySQL) + Socket.IO backend for the PM frontend",
   "private": true,
   "type": "module",
   "main": "src/server.js",
   "engines": {
-    "node": ">=20.12"
+    "node": ">=22.18"
   },
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
-    "db:setup": "node scripts/db-setup.js",
-    "db:migrate": "node scripts/db-migrate.js",
-    "db:seed": "node scripts/db-seed.js",
-    "seed": "node scripts/seed/index.js all",
-    "seed:permissions": "node scripts/seed/index.js permissions",
-    "seed:roles": "node scripts/seed/index.js roles",
-    "seed:admin": "node scripts/seed/index.js admin",
-    "seed:users": "node scripts/seed/index.js users",
-    "seed:demo": "node scripts/seed/index.js demo",
-    "seed:reset": "node scripts/seed/index.js all --reset",
+    "postinstall": "prisma generate",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:status": "prisma migrate status",
+    "db:setup": "prisma migrate deploy && node prisma/seed/index.js all --with-demo",
+    "db:reset": "prisma migrate reset",
+    "db:studio": "prisma studio",
+    "db:seed": "node prisma/seed/index.js demo",
+    "seed": "node prisma/seed/index.js all",
+    "seed:permissions": "node prisma/seed/index.js permissions",
+    "seed:roles": "node prisma/seed/index.js roles",
+    "seed:admin": "node prisma/seed/index.js admin",
+    "seed:users": "node prisma/seed/index.js users",
+    "seed:demo": "node prisma/seed/index.js demo",
+    "seed:reset": "node prisma/seed/index.js all --reset",
     "smoke": "node scripts/smoke-test.js"
   },
   "dependencies": {
+    "@prisma/adapter-mariadb": "7.10.1",
+    "@prisma/client": "7.10.1",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.6",
     "express": "^5.3.0",
     "express-rate-limit": "^8.7.1",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
-    "mysql2": "^3.24.6",
     "socket.io": "^4.8.4",
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "prisma": "7.10.1",
     "socket.io-client": "^4.8.4"
   }
 }
