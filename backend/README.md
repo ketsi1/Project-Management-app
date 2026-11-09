@@ -1,10 +1,13 @@
 # PM Backend
 
-Express + Prisma (MySQL) + Socket.IO API for the PM frontend in `../frontend`. It implements every
+TypeScript API (Express + Prisma + MySQL + Socket.IO) for the PM frontend in `../frontend`. It implements every
 endpoint in `frontend/src/api/httpApi.ts`, returns the JSON shapes in `frontend/src/types.ts`,
 and pushes changes to connected browsers in real time.
 
-- **Node.js 22.18+** (tested on Node 24; it runs Prisma's generated TypeScript client directly) and **MySQL 8.0+**
+- **Node.js 22.18+** and **MySQL 8.0+**. Node runs the `.ts` files directly in development (it strips
+  the types), and `npm run build` compiles them to plain JavaScript in `dist/` for production.
+- **TypeScript** in strict mode everywhere: the app, the seeders, the smoke test and the Prisma config.
+  Query results, request bodies (inferred from the zod schemas) and permission names are all typed.
 - **Prisma 7** is the ORM: `prisma/schema.prisma` describes every table, Prisma Migrate handles
   database changes, and all queries go through Prisma Client.
 - Authentication is built in: bcrypt password hashes, signed JWTs, our own Express middleware and
@@ -63,8 +66,10 @@ origin to `CORS_ORIGIN`.
 
 | Script | What it does |
 |---|---|
-| `npm run dev` | Start with `node --watch` (restarts on changes) |
-| `npm start` | Start for production |
+| `npm run dev` | Start from the TypeScript source with `node --watch` (restarts on changes) |
+| `npm run typecheck` | Check every file for type errors without running anything (`tsc --noEmit`) |
+| `npm run build` | Compile `src/` to JavaScript in `dist/` |
+| `npm start` | Start the compiled build for production (run `npm run build` first) |
 | `npm run db:setup` | Fresh database: applies every migration, then seeds roles, permissions, accounts and the demo data. Never drops anything. |
 | `npm run db:migrate -- --name what_changed` | **Changing the database:** after editing `prisma/schema.prisma`, creates a migration in `prisma/migrations/` and applies it (development; asks before anything destructive). |
 | `npm run db:deploy` | Applies migrations that haven't run yet (production, other machines). Never drops data. |
@@ -74,7 +79,7 @@ origin to `CORS_ORIGIN`.
 | `npm run db:generate` | Regenerates Prisma Client after a schema change (`db:migrate` and `npm install` do this too). |
 | `npm run db:seed` / `npm run seed:demo` | Adds the Acme Corp demo data (projects, tasks, bugs). Only adds what is missing; never changes your edits. |
 | `npm run seed` | Runs the four seeders below in order. Safe to repeat. |
-| `npm run seed:permissions` | Writes the permission catalog from `src/auth/permissions.js` into `permissions`. |
+| `npm run seed:permissions` | Writes the permission catalog from `src/auth/permissions.ts` into `permissions`. |
 | `npm run seed:roles` | Gives every organization the default roles (Owner, Admin, Project Manager, Member) with their permissions. Keeps changes admins made. |
 | `npm run seed:admin` | Creates the admin account (`SEED_ADMIN_*`) in the organization it already belongs to, or in `SEED_ORG_NAME` (created if missing). |
 | `npm run seed:users` | Creates one account per other role (`SEED_MANAGER_*`, `SEED_MEMBER_*`). |
@@ -121,27 +126,31 @@ All have development defaults; see `.env.example`.
 
 ```
 src/
-  server.js            HTTP server + Socket.IO, startup DB check, graceful shutdown
-  app.js               Express app: helmet, CORS, JSON body, routes, 404, error handler
-  config/env.js        Reads and checks environment variables once
-  db/prisma.js         The shared Prisma Client (MySQL through the MariaDB driver adapter)
-  db/mappers.js        Prisma records → frontend JSON shapes
+  server.ts            HTTP server + Socket.IO, startup DB check, graceful shutdown
+  app.ts               Express app: helmet, CORS, JSON body, routes, 404, error handler
+  config/env.ts        Reads and checks environment variables once
+  db/prisma.ts         The shared Prisma Client (MySQL through the MariaDB driver adapter), and the Db type
+  db/mappers.ts        Prisma records → frontend JSON shapes (and their DTO types)
   generated/prisma/    Generated Prisma Client (not committed; `npm install` creates it)
-  auth/                password.js (bcrypt), tokens.js (JWT), sessionStore.js (revocable sessions),
-                       permissions.js (the permission catalog and default roles)
-  config/seedAccounts.js  Seeded accounts (from SEED_* variables)
-  middleware/          auth.js (authenticate, requirePermission, can), validate.js (zod), errors.js
-  validation/          schemas.js — request shapes and user-facing messages
-  routes/index.js      Every endpoint, with its auth and role rules
+  auth/                password.ts (bcrypt), tokens.ts (JWT), sessionStore.ts (revocable sessions, AuthContext),
+                       permissions.ts (the permission catalog, PermissionKey type and default roles)
+  config/seedAccounts.ts  Seeded accounts (from SEED_* variables)
+  middleware/          auth.ts (authenticate, authOf, requirePermission, can),
+                       validate.ts (validate, validated, param), errors.ts
+  validation/          schemas.ts — request shapes, user-facing messages, and input types (z.infer)
+  routes/index.ts      Every endpoint, with its auth and role rules
   controllers/         Thin HTTP layer: read request, call service, send status code
   services/            Business rules and SQL, always scoped to the caller's organization
-  realtime/            socket.js (token auth, rooms, broadcast), events.js (event names)
+  realtime/            socket.ts (token auth, rooms, broadcast), events.ts (event names)
+  types/express.d.ts   Adds req.auth and req.valid to Express's Request type
 prisma/
   schema.prisma        Every table, column, index and relation
   migrations/          SQL migrations created by Prisma Migrate
-  seed/                Seeders: roles, permissions, accounts (index.js) and demo data (demo.js)
-prisma.config.js       Prisma CLI settings (schema, migrations, seed command, connection)
-scripts/smoke-test.js  End-to-end check against a running server
+  seed/                Seeders: roles, permissions, accounts (index.ts) and demo data (demo.ts)
+prisma.config.ts       Prisma CLI settings (schema, migrations, seed command, connection)
+scripts/smoke-test.ts  End-to-end check against a running server
+tsconfig.json          Type-checking settings for everything above (strict)
+tsconfig.build.json    Build settings: src/ → dist/
 ```
 
 ## How it works
@@ -159,7 +168,7 @@ scripts/smoke-test.js  End-to-end check against a running server
 - **User ↔ Role ↔ Permission**: each membership points at a role (`organization_members.role_id`),
   and each role has permissions (`role_permissions`). Routes check permissions, never role names:
   `requirePermission('projects.create')`. The list of permissions lives in
-  `src/auth/permissions.js`; admins change what each role may do in Settings → Roles
+  `src/auth/permissions.ts`; admins change what each role may do in Settings → Roles
   (`/api/roles`). Permissions are read on every request, so changes apply immediately.
 - **Default roles** per organization: Owner (everything, cannot be edited), Admin (everything),
   Project Manager (projects and all tasks, no people or settings), Member (own work, can add
@@ -219,7 +228,7 @@ production, returned as `inviteLink` so the admin can copy it from Settings → 
 
 The invited person sets their password with `POST /api/auth/accept-invite`
 `{ token, password }` (the frontend's `/accept-invite` page), which returns a Session like
-login. To send real emails, replace the `console.info` in `src/services/memberService.js`.
+login. To send real emails, replace the `console.info` in `src/services/memberService.ts`.
 
 ## API reference
 
@@ -265,3 +274,17 @@ All paths are under `/api`. Everything except health, register, login and accept
 | PATCH | `/bugs/:id` | `bugs.manage`, or reporter (details + status), or assignee (status) | `Bug` |
 | DELETE | `/bugs/:id` | `bugs.manage`, or the reporter while it is open | 204 |
 | POST | `/bugs/:id/comments` | can see it | `BugComment` (201) |
+
+## TypeScript conventions
+
+- **Imports use the real file name**, `import { env } from './config/env.ts'`. Node needs that to run
+  `.ts` directly, and `npm run build` rewrites them to `.js` in `dist/`.
+- **Type-only imports say so**: `import type { Request } from 'express'`. Node removes them when it strips
+  types; without `type` it would try to load something that doesn't exist at runtime.
+- **No TypeScript-only runtime syntax** (`enum`, `namespace`, constructor parameter properties). Node can't
+  strip those, so `erasableSyntaxOnly` reports them. Use `as const` objects instead of enums.
+- **Controllers read typed input** with `validated(req, schemas.createBugSchema)` (the same schema the
+  route's `validate()` used), the caller with `authOf(req)`, and route ids with `param(req, 'id')`.
+- **Functions that may run inside a transaction take `db: Db`** (from `src/db/prisma.ts`), which accepts
+  both `prisma` and the `tx` client of `prisma.$transaction(async (tx) => ...)`.
+- **Permission names are checked by the compiler**: `requirePermission('projects.creat')` is a type error.

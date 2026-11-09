@@ -1,0 +1,12 @@
+{
+  // `npm run build`: compiles src/ to plain JavaScript in dist/ for production (`npm start`).
+  // Imports written as './env.ts' become './env.js' in the output.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "src",
+    "outDir": "dist",
+    "sourceMap": true
+  },
+  "include": ["src"]
+}

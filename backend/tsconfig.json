@@ -1,0 +1,31 @@
+{
+  // Type-checks everything in the backend: the app (src), the seeders (prisma/seed),
+  // the smoke test (scripts) and prisma.config.ts. Run `npm run typecheck`.
+  //
+  // Node (22.18+) runs these .ts files directly by stripping the types, so imports use the
+  // real file name ('./env.ts') and only syntax Node can strip is allowed (erasableSyntaxOnly).
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+
+    "noEmit": true
+  },
+  "include": ["src", "prisma/seed", "scripts", "prisma.config.ts"]
+}
